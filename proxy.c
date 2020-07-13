@@ -9,16 +9,25 @@
 #include <sys/epoll.h>
 
 #include "err_hdl.h"
+#include "queue.h"
 
-#define BUF_SIZE	(4096)
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
+
+#define HEADER_SIZE	(1024 * 8)	//8Kb
+
+void *worker_thread(void* ptr)
+{
+	struct queue *q = (struct queue*)ptr;
+
+	while (true)
+		;
+}
 
 int main(int argc, char *argv[])
 {
 	int proxy_sock;
 	struct sockaddr_in proxy_adr;
-	char buf[BUF_SIZE];
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -40,6 +49,7 @@ int main(int argc, char *argv[])
 	if (listen(proxy_sock, BLOG) == -1)
 		err_msg("lisetn(2) error", ERR_CTC);
 
+	/*
 	struct epoll_event *ep_events;
 	struct epoll_event event;
 	int epfd, event_cnt;
@@ -99,9 +109,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	free(ep_events); 
-	close(proxy_sock);
+	free(ep_events);
 	close(epfd);
+	*/
+
+	close(proxy_sock);
 
 	return 0;
 }

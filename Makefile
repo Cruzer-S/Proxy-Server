@@ -2,7 +2,7 @@ CC = gcc
 CLFAGS = -std=c11
 
 TARGET1 = proxy_server.out
-OBJECTS1 = proxy.o err_hdl.o
+OBJECTS1 = proxy.o err_hdl.o queue.o
 
 TARGET2 = client.out
 OBJECTS2 = client.o err_hdl.o
