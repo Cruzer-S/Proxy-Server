@@ -13,6 +13,7 @@
 #define ECODE_ERRNO		(0b0010)
 
 #define ERR_NRM	0							//normal error
+#define ERR_CHK (ECODE_ERRNO)				//check error
 #define ERR_DNG (ECODE_EXIT)				//danger error
 #define ERR_CTC (ECODE_EXIT | ECODE_ERRNO)	//critical error
 

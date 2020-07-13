@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
 		event_cnt = epoll_wait(epfd, ep_events, EPOLL_SIZE, -1);
 		if (event_cnt == -1)
 		{
-			err_msg("epoll_wait(2) error", ERR_NRM);
+			err_msg("epoll_wait(2) error", ERR_CHK);
 			break;
 		}
 
@@ -89,6 +89,7 @@ int main(int argc, char *argv[])
 		}
 	}
 
+	free(ep_events); 
 	close(proxy_sock);
 	close(epfd);
 
