@@ -14,7 +14,7 @@ int main(int argc, char *argv[])
 	int sock;
 	struct sockaddr_in serv_adr;
 	char buf[BUF_SIZE];
-	int wr_len, rd_len;
+	int wr_len, rd_len, count;
 
 	if (argc != 3)
 		err_msg("usage: %s <ip address> <port>", ERR_DNG, argv[0]);
@@ -40,6 +40,18 @@ int main(int argc, char *argv[])
 			break;
 		
 		wr_len = write(sock, buf, strlen(buf));
+
+		rd_len = 0;
+		while (rd_len < wr_len) {
+			count = read(sock, &buf[rd_len], BUF_SIZE - 1);
+			if (count == -1)
+				err_msg("read(2) error", ERR_CTC);
+
+			rd_len += count;
+		}
+
+		buf[rd_len] = 0;
+		printf("Message: %s", buf);
 	}
 
 	close(sock);
