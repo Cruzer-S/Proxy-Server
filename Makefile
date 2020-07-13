@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -std=c11
-TARGET = server
-OBJECTS = err_hdl.o server.o
+TARGET = proxy_server
+OBJECTS = err_hdl.o proxy.o
 
 all : $(TARGET)
 
@@ -9,4 +9,4 @@ $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 clean :
-		rm *.o server
+		rm *.o proxy_server

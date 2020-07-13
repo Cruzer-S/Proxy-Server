@@ -10,23 +10,18 @@ void err_msg(const char *fmt_msg, int type, ...)
 
 	vsnprintf(buf, MAXLINE - 1, fmt_msg, ap);
 
-	fflush(stdout);
-	
-	fputs(buf, stderr);
-
-	fflush(NULL);
-
 	va_end(ap);
 
-	switch (type)
-	{
-	case ERR_NRM:
-		break;
+	if (type & ECODE_ERRNO)
+		snprintf(buf + strlen(buf), MAXLINE - strlen(buf) - 1, 
+				": %s", strerror(errno));
 
-	case ERR_DNG:
-		exit(1);
+	strcat(buf, "\n");
 
-	case ERR_CTC:
+	fflush(stdout);
+	fputs(buf, stderr);
+	fflush(NULL);
+
+	if (type & ECODE_EXIT)
 		exit(1);
-	}
 }
