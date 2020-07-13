@@ -4,6 +4,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <pthread.h>
+
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
@@ -16,27 +18,55 @@
 
 #define HEADER_SIZE	(1024 * 8)	//8Kb
 
-void *worker_thread(void* ptr)
-{
-	struct queue *q = (struct queue*)ptr;
+struct queue_data {
+	int fd;
+	char data[HEADER_SIZE];
+};
 
-	while (true)
-		;
+struct thead_arg {
+	struct queue* q;
+};
+
+void *worker_thread(void* );
+
+long get_processor(void)
+{
+	long nprocs;
+
+#ifdef _SC_NPROCESSORS_ONLN
+	nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+	if (nprocs < 0) {
+		if (errno == EINVAL) {
+			err_msg("sysconf: _SC_NPROCESSORS_ONLN not supported", ERR_NRM);
+		} else {
+			err_msg("sysconf error", ERR_CTC);
+		}
+	}
+#else
+	err_msg("_SC_NPROCESSORS_ONLN not exist", ERR_NRM);
+	nprocs = 4;
+#endif
+
+	return nprocs;
 }
 
 int main(int argc, char *argv[])
 {
 	int proxy_sock;
 	struct sockaddr_in proxy_adr;
+	struct queue header_queue;
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
 
 	printf("server address: %s:%s \n", argv[2], argv[3]);
 
+	if (queue_create(&header_queue, sizeof(struct queue_data), EPOLL_SIZE) < 0)
+		err_msg("queue_create() error", ERR_DNG);
+
 	proxy_sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (proxy_sock == -1)
-		err_msg("socket(2) error", ERR_CTC);
+		err_msg("socket() error", ERR_CTC);
 
 	memset(&proxy_adr, 0, sizeof(proxy_adr));
 	proxy_adr.sin_family = AF_INET;
@@ -44,76 +74,45 @@ int main(int argc, char *argv[])
 	proxy_adr.sin_port = htons(atoi(argv[1]));
 
 	if (bind(proxy_sock, (struct sockaddr*) &proxy_adr, sizeof(proxy_adr)) == -1)
-		err_msg("bind(2) error", ERR_CTC);
+		err_msg("bind() error", ERR_CTC);
 
 	if (listen(proxy_sock, BLOG) == -1)
-		err_msg("lisetn(2) error", ERR_CTC);
+		err_msg("lisetn() error", ERR_CTC);
 
-	/*
-	struct epoll_event *ep_events;
-	struct epoll_event event;
-	int epfd, event_cnt;
+	pthread_t tid;
+	long nprocs = get_processor();
+	if (nprocs < 2) nprocs = 2;
 
-	epfd = epoll_create(EPOLL_SIZE);
-	ep_events = malloc(sizeof(struct epoll_event) * EPOLL_SIZE);
-
-	event.events = EPOLLIN;
-	event.data.fd = proxy_sock;
-	epoll_ctl(epfd, EPOLL_CTL_ADD, proxy_sock, &event);
-
-	while (1)
-	{
-		event_cnt = epoll_wait(epfd, ep_events, EPOLL_SIZE, -1);
-		if (event_cnt == -1)
-		{
-			err_msg("epoll_wait(2) error", ERR_CHK);
-			break;
+	printf("number of processors: %ld \n", nprocs);
+	for (long i = 0; i < nprocs; i++) {
+		if (pthread_create(
+				&tid, NULL, worker_thread, 
+				(void*)&(struct sockaddr_in) {
+					.sin_family = AF_INET,
+					.sin_addr.s_addr = inet_addr(argv[2]),
+					.sin_port = htons(atoi(argv[3]))
+					}) != 0) {
+			err_msg("pthread_create() error", ERR_NRM);
 		}
 
-		for (int i = 0; i < event_cnt; i++)
-		{
-			printf("event.data.ptr: %p \n", ep_events[i].data.ptr);
-
-			if (ep_events[i].data.fd == proxy_sock)
-			{
-				struct sockaddr_in clnt_adr;
-
-				int adr_sz = sizeof(clnt_adr);
-				int clnt_sock = accept(proxy_sock, (struct sockaddr*)&clnt_adr, &adr_sz);
-				event.events = EPOLLIN | EPOLLET;
-				event.data.fd = clnt_sock;
-
-				epoll_ctl(epfd, EPOLL_CTL_ADD, clnt_sock, &event);
-			} else {
-				int str_len;
-
-				while (true)
-				{
-					str_len = read(ep_events[i].data.fd, buf, BUF_SIZE);
-					if (str_len == 0)	//close-request
-					{
-						epoll_ctl(
-							epfd, EPOLL_CTL_DEL, ep_events[i].data.fd, NULL
-						);
-						close(ep_events[i].data.fd);
-						printf("closed client: %d \n", ep_events[i].data.fd);
-						break;
-					} else if (str_len < 0) {
-						if (errno == EAGAIN)
-							break;
-					} else {
-						write(ep_events[i].data.fd, buf, str_len);
-					}
-				}
-			}
-		}
 	}
 
-	free(ep_events);
-	close(epfd);
-	*/
+	queue_release(&header_queue);
 
 	close(proxy_sock);
 
 	return 0;
+}
+
+void *worker_thread(void* ptr)
+{
+	struct sockaddr_in serv_adr = *(struct sockaddr_in*)ptr;
+
+	printf("[%lu] serv_adr: %s:%hd \n", 
+			pthread_self() % 100, 
+			inet_ntop(AF_INET, &serv_adr.sin_addr, 
+				(char [INET_ADDRSTRLEN]){[0] = '\0'}, 
+				INET_ADDRSTRLEN
+			), ntohs(serv_adr.sin_port)
+	);
 }

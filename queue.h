@@ -6,7 +6,17 @@
 
 #include <string.h>		//memcpy
 
-struct queue;
+struct queue {
+	void **data;
+
+	size_t first;
+	size_t last;
+
+	size_t size;
+	size_t length;
+
+	bool reverse;
+};
 
 int queue_create(struct queue* , size_t , size_t );
 

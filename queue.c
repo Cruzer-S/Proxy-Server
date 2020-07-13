@@ -1,17 +1,5 @@
 #include "queue.h"
 
-struct queue {
-	void** data;
-
-	size_t first;
-	size_t last;
-
-	size_t size;
-	size_t length;
-
-	bool reverse;
-};
-
 int queue_create(struct queue* q, size_t size, size_t length)
 {
 	q->data = malloc(sizeof(void*) * length);

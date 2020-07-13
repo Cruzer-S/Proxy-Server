@@ -1,5 +1,6 @@
 CC = gcc
-CLFAGS = -std=c11
+
+CFLAGS = -std=c11 -pthread
 
 TARGET1 = proxy_server.out
 OBJECTS1 = proxy.o err_hdl.o queue.o
