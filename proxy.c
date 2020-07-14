@@ -3,12 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <pthread.h>
 
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "err_hdl.h"
 #include "queue.h"
@@ -23,7 +26,9 @@ struct queue_data {
 	char data[HEADER_SIZE];
 };
 
-struct thead_arg {
+struct thread_arg {
+	int proxy_sock;
+	struct sockaddr_in serv_adr;
 	struct queue* q;
 };
 
@@ -43,8 +48,8 @@ long get_processor(void)
 		}
 	}
 #else
-	err_msg("_SC_NPROCESSORS_ONLN not exist", ERR_NRM);
-	nprocs = 4;
+	err_msg("_SC_NPROCESSORS_ONLN doesn't exist", ERR_NRM);
+	nprocs = 2;
 #endif
 
 	return nprocs;
@@ -55,6 +60,10 @@ int main(int argc, char *argv[])
 	int proxy_sock;
 	struct sockaddr_in proxy_adr;
 	struct queue header_queue;
+
+	long nprocs;
+	struct thread_arg thd_arg;
+	void *ret;
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -79,22 +88,35 @@ int main(int argc, char *argv[])
 	if (listen(proxy_sock, BLOG) == -1)
 		err_msg("lisetn() error", ERR_CTC);
 
-	pthread_t tid;
-	long nprocs = get_processor();
+	nprocs = get_processor();
 	if (nprocs < 2) nprocs = 2;
 
+	pthread_t tid[nprocs];
+
+	thd_arg = (struct thread_arg) {
+		.serv_adr = (struct sockaddr_in) {
+			.sin_family = AF_INET,
+			.sin_addr.s_addr = inet_addr(argv[2]),
+			.sin_port = htons(atoi(argv[3]))
+		},	//Do not use serv_adr to socket function directly,
+			//remained member(or byte) isn't filled with zero
+		.q = &header_queue
+	};
+
+	int check;
 	printf("number of processors: %ld \n", nprocs);
 	for (long i = 0; i < nprocs; i++) {
-		if (pthread_create(
-				&tid, NULL, worker_thread, 
-				(void*)&(struct sockaddr_in) {
-					.sin_family = AF_INET,
-					.sin_addr.s_addr = inet_addr(argv[2]),
-					.sin_port = htons(atoi(argv[3]))
-					}) != 0) {
-			err_msg("pthread_create() error", ERR_NRM);
+		if ((check = pthread_create(
+				&tid[i], NULL, worker_thread, &thd_arg
+												)) != 0 ) {
+			err_msg("pthread_create() error: %d", check, ERR_NRM);
 		}
+	}
 
+	for (long i = 0; i < nprocs; i++) {
+		if ((check = pthread_join(tid[i], &ret)) != 0) {
+			err_msg("pthread_join() error: %d", check, ERR_NRM);
+		}
 	}
 
 	queue_release(&header_queue);
@@ -104,15 +126,108 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void *worker_thread(void* ptr)
+void *worker_thread(void *ptr)
 {
-	struct sockaddr_in serv_adr = *(struct sockaddr_in*)ptr;
+	struct thread_arg thd_arg = *(struct thread_arg *)ptr;
 
-	printf("[%lu] serv_adr: %s:%hd \n", 
+	int proxy_sock, clnt_sock;
+	struct sockaddr_in serv_adr, clnt_adr;
+	struct queue *q;
+	int flag;
+
+	struct epoll_event *ep_events;
+	struct epoll_event event;
+	int epfd, event_cnt;
+
+	int str_len;
+
+	char buf[HEADER_SIZE];
+
+	proxy_sock = thd_arg.proxy_sock;
+
+	memset(&serv_adr, 0, sizeof(serv_adr));
+	serv_adr = thd_arg.serv_adr;
+
+	q = thd_arg.q;
+
+	epfd = epoll_create(EPOLL_SIZE);
+	ep_events = malloc(sizeof(struct epoll_event) * EPOLL_SIZE);
+
+	event.events = EPOLLIN;
+	event.data.fd = proxy_sock;
+	epoll_ctl(epfd, EPOLL_CTL_ADD, proxy_sock, &event);
+
+	printf("[worker: %lu] serv_adr: %s:%hd \n", 
 			pthread_self() % 100, 
-			inet_ntop(AF_INET, &serv_adr.sin_addr, 
-				(char [INET_ADDRSTRLEN]){[0] = '\0'}, 
+			inet_ntop(	
+				AF_INET, &serv_adr.sin_addr, 
+				(char [INET_ADDRSTRLEN]) { /* empty */ }, 
 				INET_ADDRSTRLEN
 			), ntohs(serv_adr.sin_port)
 	);
+
+	while (true)
+	{
+		event_cnt = epoll_wait(epfd, ep_events, EPOLL_SIZE, -1);
+		if (event_cnt == -1) {
+			err_msg("epoll_wait() error", ERR_CHK);
+
+			return (void *)EXIT_FAILURE;
+		}
+
+		printf("[worker %lu] ", pthread_self() % 100);
+
+		for (int i = 0; i < event_cnt; i++)
+		{
+			if (ep_events[i].data.fd == proxy_sock) {
+				clnt_sock = accept(
+						proxy_sock, (struct sockaddr*)&clnt_adr, (int[1]) { sizeof(clnt_adr) }
+				);
+
+				if (clnt_sock == -1) {
+					err_msg("accept() error", ERR_CHK);
+					continue;
+				}
+
+	 			if (fcntl(clnt_sock, F_SETOWN, getpid()) == -1) {
+					err_msg("fcntl(F_SETOWN) error", ERR_CHK);
+					close(clnt_sock);
+
+					continue;
+				}
+
+				flag = fcntl(clnt_sock, F_GETFL, 0);
+				if (fcntl(clnt_sock, F_SETFL, flag | O_NONBLOCK) == -1) {
+					err_msg("fcntl(F_SETFL) error", ERR_CHK);
+					close(clnt_sock);
+
+					continue;
+				}
+
+				event.events = EPOLLIN | EPOLLET;
+				event.data.fd = clnt_sock;
+				
+				epoll_ctl(epfd, EPOLL_CTL_ADD, clnt_sock, &event);
+				
+				printf("connected client: %d \n", clnt_sock);
+			} else {
+				str_len = read(ep_events[i].data.fd, buf, HEADER_SIZE);
+				if (str_len == 0) {
+					epoll_ctl(epfd, EPOLL_CTL_DEL, ep_events[i].data.fd, NULL);
+					close(ep_events[i].data.fd);
+					printf("closed client: %d \n",ep_events[i].data.fd);
+					break;
+				} else if (str_len < 0) {
+					if (errno == EAGAIN)
+						break;
+				} else {
+					write(ep_events[i].data.fd, buf, str_len);
+				}
+			}
+
+			continue;
+		}
+	}
+
+	return (void *)EXIT_SUCCESS;
 }
