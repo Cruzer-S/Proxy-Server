@@ -10,8 +10,6 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #include "err_hdl.h"
 #include "queue.h"
@@ -30,36 +28,22 @@ struct thread_arg {
 	int proxy_sock;
 	struct sockaddr_in serv_adr;
 	struct queue* q;
+	int epfd;
 };
 
 void *worker_thread(void* );
 
-long get_processor(void)
-{
-	long nprocs;
-
-#ifdef _SC_NPROCESSORS_ONLN
-	nprocs = sysconf(_SC_NPROCESSORS_ONLN);
-	if (nprocs < 0) {
-		if (errno == EINVAL) {
-			err_msg("sysconf: _SC_NPROCESSORS_ONLN not supported", ERR_NRM);
-		} else {
-			err_msg("sysconf error", ERR_CTC);
-		}
-	}
-#else
-	err_msg("_SC_NPROCESSORS_ONLN doesn't exist", ERR_NRM);
-	nprocs = 2;
-#endif
-
-	return nprocs;
-}
+long get_processor(void);
 
 int main(int argc, char *argv[])
 {
 	int proxy_sock;
 	struct sockaddr_in proxy_adr;
 	struct queue header_queue;
+
+	struct epoll_event *ep_events;
+	struct epoll_event event;
+	int epfd, event_cnt;
 
 	long nprocs;
 	struct thread_arg thd_arg;
@@ -88,6 +72,19 @@ int main(int argc, char *argv[])
 	if (listen(proxy_sock, BLOG) == -1)
 		err_msg("lisetn() error", ERR_CTC);
 
+	epfd = epoll_create(EPOLL_SIZE);
+	if (epfd == -1)
+		err_msg("epoll_cretae() error", ERR_DNG);
+
+	ep_events = malloc(sizeof(struct epoll_event) * EPOLL_SIZE);
+	if (ep_events == NULL)
+		err_msg("malloc() error", ERR_DNG);
+
+	event.events = EPOLLIN;
+	event.data.fd = proxy_sock;
+	if (epoll_ctl(epfd, EPOLL_CTL_ADD, proxy_sock, &event) == -1)
+		err_msg("epoll_ctl() error", ERR_DNG);
+
 	nprocs = get_processor();
 	if (nprocs < 2) nprocs = 2;
 
@@ -100,7 +97,8 @@ int main(int argc, char *argv[])
 			.sin_port = htons(atoi(argv[3]))
 		},	//Do not use serv_adr to socket function directly,
 			//remained member(or byte) isn't filled with zero
-		.q = &header_queue
+		.q = &header_queue,
+		.epfd = epfd
 	};
 
 	int check;
@@ -149,13 +147,7 @@ void *worker_thread(void *ptr)
 	serv_adr = thd_arg.serv_adr;
 
 	q = thd_arg.q;
-
-	epfd = epoll_create(EPOLL_SIZE);
-	ep_events = malloc(sizeof(struct epoll_event) * EPOLL_SIZE);
-
-	event.events = EPOLLIN;
-	event.data.fd = proxy_sock;
-	epoll_ctl(epfd, EPOLL_CTL_ADD, proxy_sock, &event);
+	epfd = thd_arg.epfd;
 
 	printf("[worker: %lu] serv_adr: %s:%hd \n", 
 			pthread_self() % 100, 
@@ -230,4 +222,25 @@ void *worker_thread(void *ptr)
 	}
 
 	return (void *)EXIT_SUCCESS;
+}
+
+long get_processor(void)
+{
+	long nprocs;
+
+#ifdef _SC_NPROCESSORS_ONLN
+	nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+	if (nprocs < 0) {
+		if (errno == EINVAL) {
+			err_msg("sysconf: _SC_NPROCESSORS_ONLN not supported", ERR_NRM);
+		} else {
+			err_msg("sysconf error", ERR_CTC);
+		}
+	}
+#else
+	err_msg("_SC_NPROCESSORS_ONLN doesn't exist", ERR_NRM);
+	nprocs = 2;
+#endif
+
+	return nprocs;
 }
