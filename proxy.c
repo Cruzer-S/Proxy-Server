@@ -27,8 +27,9 @@ struct queue_data {
 struct thread_arg {
 	int proxy_sock;
 	struct sockaddr_in serv_adr;
-	struct queue* q;
+	struct queue* que;
 	int epfd;
+	struct epoll_event *ep_events;
 };
 
 void *worker_thread(void* );
@@ -39,14 +40,16 @@ int main(int argc, char *argv[])
 {
 	int proxy_sock;
 	struct sockaddr_in proxy_adr;
+
 	struct queue header_queue;
 
 	struct epoll_event *ep_events;
 	struct epoll_event event;
-	int epfd, event_cnt;
+	int epfd;
 
 	long nprocs;
 	struct thread_arg thd_arg;
+
 	void *ret;
 
 	if (argc != 4)
@@ -97,8 +100,9 @@ int main(int argc, char *argv[])
 			.sin_port = htons(atoi(argv[3]))
 		},	//Do not use serv_adr to socket function directly,
 			//remained member(or byte) isn't filled with zero
-		.q = &header_queue,
-		.epfd = epfd
+		.que = &header_queue,
+		.epfd = epfd,
+		.ep_events = ep_events
 	};
 
 	int check;
@@ -130,11 +134,11 @@ void *worker_thread(void *ptr)
 
 	int proxy_sock, clnt_sock;
 	struct sockaddr_in serv_adr, clnt_adr;
-	struct queue *q;
+	struct queue *que;
 	int flag;
 
-	struct epoll_event *ep_events;
 	struct epoll_event event;
+	struct epoll_event *ep_events;
 	int epfd, event_cnt;
 
 	int str_len;
@@ -144,10 +148,13 @@ void *worker_thread(void *ptr)
 	proxy_sock = thd_arg.proxy_sock;
 
 	memset(&serv_adr, 0, sizeof(serv_adr));
-	serv_adr = thd_arg.serv_adr;
+	serv_adr.sin_family = thd_arg.serv_adr.sin_family;
+	serv_adr.sin_addr = thd_arg.serv_adr.sin_addr;
+	serv_adr.sin_port = thd_arg.serv_adr.sin_port;
 
-	q = thd_arg.q;
+	que = thd_arg.que;
 	epfd = thd_arg.epfd;
+	ep_events = thd_arg.ep_events;
 
 	printf("[worker: %lu] serv_adr: %s:%hd \n", 
 			pthread_self() % 100, 
@@ -203,17 +210,26 @@ void *worker_thread(void *ptr)
 				
 				printf("connected client: %d \n", clnt_sock);
 			} else {
-				str_len = read(ep_events[i].data.fd, buf, HEADER_SIZE);
-				if (str_len == 0) {
-					epoll_ctl(epfd, EPOLL_CTL_DEL, ep_events[i].data.fd, NULL);
-					close(ep_events[i].data.fd);
-					printf("closed client: %d \n",ep_events[i].data.fd);
-					break;
-				} else if (str_len < 0) {
-					if (errno == EAGAIN)
+				while (true)
+				{
+					str_len = read(ep_events[i].data.fd, buf, HEADER_SIZE);
+					if (str_len == 0) {
+						if (epoll_ctl(epfd, EPOLL_CTL_DEL, ep_events[i].data.fd, NULL) == -1) {
+							err_msg("epoll_ctl() error", ERR_CHK);
+							return (void *)EXIT_FAILURE;
+						}
+
+						close(ep_events[i].data.fd);
+						printf("closed client: %d \n", ep_events[i].data.fd);
+
 						break;
-				} else {
-					write(ep_events[i].data.fd, buf, str_len);
+					} else if (str_len < 0) {
+						err_msg("read() error", ERR_CHK);
+						if (errno == EAGAIN)
+							break;
+					} else {
+						write(ep_events[i].data.fd, buf, str_len);
+					}
 				}
 			}
 

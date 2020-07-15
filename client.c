@@ -21,7 +21,7 @@ int main(int argc, char *argv[])
 
 	sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (sock == -1)
-		err_msg("socket(2) error", ERR_CTC);
+		err_msg("socket() error", ERR_CTC);
 
 	memset(&serv_adr, 0, sizeof(serv_adr));
 	serv_adr.sin_family = AF_INET;
@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 	serv_adr.sin_port = htons(atoi(argv[2]));
 
 	if (connect(sock, (struct sockaddr*)&serv_adr, sizeof(serv_adr)) == -1)
-		err_msg("connect(2) error", ERR_CTC);
+		err_msg("connect() error", ERR_CTC);
 
 	while (true)
 	{
@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 		while (rd_len < wr_len) {
 			count = read(sock, &buf[rd_len], BUF_SIZE - 1);
 			if (count == -1)
-				err_msg("read(2) error", ERR_CTC);
+				err_msg("read() error", ERR_CTC);
 
 			rd_len += count;
 		}
