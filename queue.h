@@ -1,10 +1,11 @@
-#ifndef __QUEUE_H__
+$)C#ifndef __QUEUE_H__
 #define __QUEUE_H__
 
 #include <stdlib.h>		//malloc
 #include <stdbool.h>	//bool
 
 #include <string.h>		//memcpy
+#include <pthread.h>
 
 struct queue {
 	void **data;
@@ -16,7 +17,9 @@ struct queue {
 	size_t length;
 
 	bool reverse;
-};
+	
+	pthread_mutext_t mtx;
+}
 
 int queue_create(struct queue* , size_t , size_t );
 
