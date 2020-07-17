@@ -1,11 +1,7 @@
-$)C#include "queue.h"
+#include "queue.h"
 
-int queue_create(struct queue* q, size_t size, size_t length, bool thread_safety)
+int queue_create(struct queue* q, size_t size, size_t length)
 {
-	if (thread_safety)
-		if (pthread_mutex_init(&q->mtx, NULL) != 0))
-			return -1;
-	
 	q->data = malloc(sizeof(void*) * length);
 	if (q == NULL)
 		return -1;
@@ -27,13 +23,10 @@ int queue_create(struct queue* q, size_t size, size_t length, bool thread_safety
 
 bool queue_push(struct queue* q, void* data)
 {
-	pthread_mutex_lock(&q->mtx);
-	
 	size_t first = q->first, last = q->last;
 
 	if (q->reverse) {
 		if (first == last) {
-			pthread_mutex_unlock(&q->mtx);	
 			return false;
 		}
 	}
@@ -45,20 +38,15 @@ bool queue_push(struct queue* q, void* data)
 		q->reverse = true;
 	}
 	
-	pthread_mutex_unlock(&q->mtx);
-
 	return true;
 }
 
 bool queue_pop(struct queue* q, void* data)
 {
-	pthread_mutex_lock(&q->mtx);
-	
 	size_t first = q->first, last = q->last;
 
 	if (!q->reverse) {
 		if (first == last) {
-			pthread_mutex_unlock(&q->mtx);
 			return false;
 		}
 	}
@@ -70,7 +58,6 @@ bool queue_pop(struct queue* q, void* data)
 		q->reverse = false;
 	}
 	
-	pthread_mutex_lock(&q->mtx);
 	return true;
 }
 
@@ -97,6 +84,4 @@ void queue_release(struct queue* q)
 	q->size = q->length = 0U;
 	q->first = q->last = 0U;
 	q->reverse = false;
-	
-	pthread_mutex_destroy(&q->mtx);
 }
