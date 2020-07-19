@@ -60,7 +60,8 @@ int main(int argc, char *argv[])
 
 	printf("server address: %s:%s \n", argv[2], argv[3]);
 
-	printf("open_max: %ld \n", open_max()); hash_sock = malloc(sizeof(int) * open_max());
+	printf("open_max: %ld \n", open_max()); 
+	hash_sock = malloc(sizeof(int) * open_max());
 	if (hash_sock == NULL)
 		err_msg("malloc() error", ERR_CTC);
 
@@ -99,8 +100,8 @@ int main(int argc, char *argv[])
 	};
 
 	if (pthread_create(
-				&worker_tid, NULL, 
-						worker_thread, (void*)&thd_arg) != 0)
+			&worker_tid, NULL, 
+			worker_thread, (void*)&thd_arg) != 0)	
 		err_msg("pthread_create() error", ERR_CTC);
 
 	if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
@@ -114,12 +115,8 @@ int main(int argc, char *argv[])
 
 		if (clnt_sock == -1) {
 			err_msg("accept() error", ERR_CHK);
-
 			continue;
 		}
-
-		printf("client address: ");
-		show_address(&clnt_adr, " \n");
 
 		serv_sock = socket(PF_INET, SOCK_STREAM, 0);
 		if (serv_sock == -1) {
@@ -130,26 +127,19 @@ int main(int argc, char *argv[])
 
 		if (connect(serv_sock, (struct sockaddr*)&serv_adr, sizeof(serv_adr)) == -1) {
 			err_msg("connect() error", ERR_CHK);
-
+			close(clnt_sock);
 			continue;
 		}
 
-		printf("connect to server \n");
-		hash_sock[clnt_sock] = serv_sock;
-
-	 	if (fcntl(clnt_sock, F_SETOWN, getpid()) == -1) {
+		if (fcntl(clnt_sock, F_SETOWN, getpid()) == -1) {
 			err_msg("fcntl(F_SETOWN) error", ERR_CHK);
-			close(clnt_sock);
-
-			continue;
+			goto ERROR;
 		}
 
 		flag = fcntl(clnt_sock, F_GETFL, 0);
 		if (fcntl(clnt_sock, F_SETFL, flag | O_NONBLOCK) == -1) {
 			err_msg("fcntl(F_SETFL) error", ERR_CHK);
-			close(clnt_sock);
-
-			continue;
+			goto ERROR;
 		}
 
 		event.events = EPOLLIN | EPOLLET;
@@ -157,15 +147,25 @@ int main(int argc, char *argv[])
 				
 		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, clnt_sock, &event) == -1) {
 			err_msg("epoll_ctl(client) error", ERR_CHK);
-			close(clnt_sock);
-
-			continue;
+			goto ERROR;
 		}
 
+		printf("client address: ");
+		show_address(&clnt_adr, " \n");
+
+		hash_sock[clnt_sock] = serv_sock;
 		printf("connected client: %d \n", clnt_sock);
+
+		continue; ERROR:
+		close(clnt_sock);
+		close(serv_sock);
+		hash_sock[clnt_sock] = -1;
 	}
 
 	close(proxy_sock);
+
+	free(hash_sock);
+	free(epoll_event);
 
 	return 0;
 }
@@ -191,9 +191,10 @@ void *worker_thread(void *args)
 		for (int i = 0; i < event_cnt; i++)
 		{
 			clnt_fd = ep_events[i].data.fd;
-
-			if ( (serv_fd = hash_sock[clnt_fd]) == -1)
-				err_msg("corresponding fd isn't register", ERR_NRM);
+			if ( (serv_fd = hash_sock[clnt_fd]) == -1) {
+				err_msg("corresponding serv_fd isn't register", ERR_NRM);
+				continue;
+			}
 
 			str_len = read(clnt_fd, buf, BUF_SIZE);
 			if (str_len == 0) {
@@ -201,6 +202,7 @@ void *worker_thread(void *args)
 					epoll_fd, EPOLL_CTL_DEL, clnt_fd, NULL
 				);
 
+				hash_sock[clnt_fd] = -1;
 				close(clnt_fd);
 
 				printf("closed client: %d \n", clnt_fd);
@@ -208,7 +210,7 @@ void *worker_thread(void *args)
 				continue;
 			}
 
-			write(ep_events[i].data.fd, buf, str_len);
+			write(serv_fd, buf, str_len);
 		}
 	}
 
