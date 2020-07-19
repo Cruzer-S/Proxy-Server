@@ -60,8 +60,7 @@ int main(int argc, char *argv[])
 
 	printf("server address: %s:%s \n", argv[2], argv[3]);
 
-	printf("open_max: %ld \n", open_max());
-	hash_sock = malloc(sizeof(int) * open_max());
+	printf("open_max: %ld \n", open_max()); hash_sock = malloc(sizeof(int) * open_max());
 	if (hash_sock == NULL)
 		err_msg("malloc() error", ERR_CTC);
 
@@ -171,34 +170,47 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void show_address(struct sockaddr_in* addr, const char* end_string)
-{
-	printf("%s:%hd%s", 
-		//ip address
-		inet_ntop(	
-			AF_INET, &(addr->sin_addr),
-			(char [INET_ADDRSTRLEN]) { /* empty */ },
-			INET_ADDRSTRLEN),
-		//port number
-		ntohs(addr->sin_port),
-		//end string
-		end_string
-	);
-}
-
 void *worker_thread(void *args)
 {
 	struct thread_arg thd_arg = *(struct thread_arg *)args;
 
 	struct epoll_event event, *ep_events;
-	int epoll_fd;
+	int serv_fd, clnt_fd, epoll_fd;
 	int *hash_sock;
 
 	ep_events = thd_arg.ep_events;
 	epoll_fd = thd_arg.epoll_fd;
 	hash_sock = thd_arg.hash_sock;
 
-	//if ((connect())
+	while (1)
+	{
+		event_cnt = epoll_wait(epoll_fd, ep_events, EPOLL_SIZE, -1);
+		if (event_cnt == -1)
+			err_msg("epoll_wait() error", ERR_CHK);
+
+		for (int i = 0; i < event_cnt; i++)
+		{
+			clnt_fd = ep_events[i].data.fd;
+
+			if ( (serv_fd = hash_sock[clnt_fd]) == -1)
+				err_msg("corresponding fd isn't register", ERR_NRM);
+
+			str_len = read(clnt_fd, buf, BUF_SIZE);
+			if (str_len == 0) {
+				epoll_ctl(
+					epoll_fd, EPOLL_CTL_DEL, clnt_fd, NULL
+				);
+
+				close(clnt_fd);
+
+				printf("closed client: %d \n", clnt_fd);
+
+				continue;
+			}
+
+			write(ep_events[i].data.fd, buf, str_len);
+		}
+	}
 
 	return (void *)0;
 }
@@ -251,3 +263,20 @@ long openmax = 0;
 
 	return openmax;
 }
+
+void show_address(struct sockaddr_in* addr, const char* end_string)
+{
+	printf("%s:%hd%s", 
+		//ip address
+		inet_ntop(	
+			AF_INET, &(addr->sin_addr),
+			(char [INET_ADDRSTRLEN]) { /* empty */ },
+			INET_ADDRSTRLEN),
+		//port number
+		ntohs(addr->sin_port),
+		//end string
+		end_string
+	);
+}
+
+
