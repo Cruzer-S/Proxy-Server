@@ -16,6 +16,7 @@
 #include <sys/epoll.h>
 
 #include "err_hdl.h"
+#include "socket.h"
 
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
@@ -46,7 +47,11 @@ int connect_socket(const char *, short );
 
 int nonblocking(int );
 
-int create_epoll_struct(struct epoll_struct *, int );
+int create_epoll_struct(struct epoll_struct *, size_t );
+
+int register_epoll_struct(struct epoll_struct * ,int ,int );
+
+void release_epoll_struct(struct epoll_struct *);
 
 int main(int argc, char *argv[])
 {
@@ -56,20 +61,28 @@ int main(int argc, char *argv[])
 	int epoll_fd1, epoll_fd2;
 	struct event_struct ev_data;
 
-	struct epoll_struct ep_struct1;
-	struct epoll_struct ep_struct2;
+	struct epoll_struct ep_struct_stoc;	//server to client
+	struct epoll_struct ep_struct_ctos;	//client to server
+
+	int ret;
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
 
 	printf("server address: %s:%s \n", argv[2], argv[3]);
 
-	proxy_sock = listen_sock(atoi(argv[1]), BLOG);
+	proxy_sock = listen_socket(atoi(argv[1]), BLOG);
 	if (proxy_sock < 0)
 		err_msg("listen_sock() error: %d", ERR_CTC, proxy_sock);
 
 	if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
 		err_msg("sigset() error", ERR_CTC);
+
+	if ( (ret = create_epoll_struct(&ep_struct_stoc, EPOLL_SIZE)) != 0)
+		err_msg("create_epoll_struct(stoc) error: %d", ERR_CTC, ret);
+
+	if ( (ret = create_epoll_struct(&ep_struct_ctos, EPOLL_SIZE)) != 0)
+		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
 
 	while (true)
 	{
@@ -82,9 +95,7 @@ int main(int argc, char *argv[])
 			err_msg("accept() error", ERR_CHK);
 			continue;
 		} else {
-			show_address("client address: ", &clnt_adr, " \n");
-
-			if (ret = nonblocking(clnt_sock) != 0) {
+			if ( (ret = nonblocking(clnt_sock)) != 0) {
 				close(clnt_sock);
 				err_msg("nonblocking() error: %d ", ERR_CHK, ret);
 
@@ -97,26 +108,20 @@ int main(int argc, char *argv[])
 			close(clnt_sock);
 			continue;
 		} else {
-			if (create_epoll_struct(&ep_struct1, EPOLL_SIZE) != 0)
-				err_msg("create_epoll_struct() error!", ERR_CHK);
-
-			if (create_epoll_struct(&ep_struct2, EPOLL_SIZE) != 0)
-				err_msg("create_epoll_struct() error!", ERR_CHK);
-
-			if (register_epoll(epoll_fd, clnt_sock) != 0
-			||	register_epoll(epoll_fd, serv_sock)) {
+			if (register_epoll_struct(&ep_struct_stoc, serv_sock, EPOLLIN | EPOLLET) != 0
+			||	register_epoll_struct(&ep_struct_ctos, clnt_sock, EPOLLIN | EPOLLET) != 0) {
 				close(clnt_sock);
 				close(serv_sock);
 
 				continue;
 			}
 		}
+
+		show_address("client address: ", &clnt_adr, " \n");
+		printf("connect client successfully \n");
 	}
 
 	close(proxy_sock);
-
-	free(hash_sock);
-	free(epoll_event);
 
 	return 0;
 }
@@ -175,10 +180,11 @@ long openmax = 0;
 	return openmax;
 }
 
-void show_address(struct sockaddr_in* addr, const char* end_string)
+void show_address(const char *start_string, struct sockaddr_in* addr, const char *end_string)
 {
 	printf("%s%s:%hd%s", 
-		//
+		//start string
+		start_string,
 		//ip address
 		inet_ntop(	
 			AF_INET, &(addr->sin_addr),
@@ -224,7 +230,7 @@ int connect_socket(const char *ip_addr, short port)
 	struct sockaddr_in sock_adr;
 	
 	sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (serv_sock == -1)
+	if (sock == -1)
 		return -1;
 
 	memset(&sock_adr, 0, sizeof(struct sockaddr_in));
@@ -254,23 +260,25 @@ int nonblocking(int fd)
 	return 0;
 }
 
-int register_epoll(int epoll_fd, int sock_fd)
-{
-	struct epoll_event event;
-
-	event.events = EPOLLIN | EPOLLET;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, sock_fd, &event) == -1)
+int register_epoll_struct(struct epoll_struct *epoll_struct, int sock_fd, int opt)
+{	
+	if (epoll_ctl(
+			epoll_struct->epoll_fd, 
+			EPOLL_CTL_ADD, 
+			sock_fd, 
+			&(struct epoll_event){ .events = opt }
+		) == -1)
 		return -1;
 
 	return 0;
 }
 
-int create_epoll_struct(struct epoll_struct *ep_struct int* epoll_size)
+int create_epoll_struct(struct epoll_struct *ep_struct, size_t epoll_size)
 {
 	struct epoll_event *ep_events;
 	int epfd;
 
-	epfd = epoll_create(EPOLL_SIZE);
+	epfd = epoll_create(epoll_size);
 	if (epfd == -1)
 		return -1;
 
@@ -282,4 +290,10 @@ int create_epoll_struct(struct epoll_struct *ep_struct int* epoll_size)
 	ep_struct->ep_events = ep_events;
 
 	return 0;
+}
+
+void release_epoll_struct(struct epoll_struct *ep_struct)
+{
+	close(ep_struct->epoll_fd);
+	free(ep_struct->ep_events);
 }
