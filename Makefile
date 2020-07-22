@@ -1,5 +1,4 @@
 CC = gcc
-
 CFLAGS = -pthread
 
 TARGET1 = proxy_server.out

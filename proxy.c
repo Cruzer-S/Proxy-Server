@@ -32,26 +32,19 @@ struct event_struct {
 	int pipe_fd[2];
 };
 
-void *worker_thread(void *);
+struct thread_args {
+	struct epoll_event *ep_struct;
+	struct event_struct *ev_struct;
+	int proxy_sock;
+};
 
-void show_address(const char *, struct sockaddr_in *, const char *);
+void *worker_thread(void *);
 
 void sig_usr1(int );
 
 Sigfunc *sigset(int , Sigfunc *);
 
 long open_max(void);
-
-int listen_socket(short , int );
-int connect_socket(const char *, short );
-
-int nonblocking(int );
-
-int create_epoll_struct(struct epoll_struct *, size_t );
-
-int register_epoll_struct(struct epoll_struct * ,int ,int );
-
-void release_epoll_struct(struct epoll_struct *);
 
 int main(int argc, char *argv[])
 {
@@ -65,6 +58,8 @@ int main(int argc, char *argv[])
 	struct epoll_struct ep_struct_ctos;	//client to server
 
 	int ret;
+
+	pthread_t tid1, tid2;
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -80,9 +75,11 @@ int main(int argc, char *argv[])
 
 	if ( (ret = create_epoll_struct(&ep_struct_stoc, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(stoc) error: %d", ERR_CTC, ret);
-
+	
 	if ( (ret = create_epoll_struct(&ep_struct_ctos, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
+
+	if (pthread_create(&tid1, NULL, worker_thread, ))		
 
 	while (true)
 	{
@@ -178,122 +175,4 @@ long openmax = 0;
 	}
 
 	return openmax;
-}
-
-void show_address(const char *start_string, struct sockaddr_in* addr, const char *end_string)
-{
-	printf("%s%s:%hd%s", 
-		//start string
-		start_string,
-		//ip address
-		inet_ntop(	
-			AF_INET, &(addr->sin_addr),
-			(char [INET_ADDRSTRLEN]) { /* empty */ },
-			INET_ADDRSTRLEN),
-		//port number
-		ntohs(addr->sin_port),
-		//end string
-		end_string
-	);
-}
-
-int listen_socket(short port, int backlog)
-{
-	int sock;
-	struct sockaddr_in sock_adr;
-
-	sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock == -1)
-		return -1;
-
-	memset(&sock_adr, 0, sizeof(sock_adr));
-	sock_adr.sin_family = AF_INET;
-	sock_adr.sin_addr.s_addr = htonl(INADDR_ANY);
-	sock_adr.sin_port = htons(port);
-
-	if (bind(sock, (struct sockaddr*) &sock_adr, sizeof(struct sockaddr_in)) == -1) {
-		close(sock);
-		return -2;
-	}
-
-	if (listen(sock, backlog) == -1) {
-		close(sock);
-		return -3;
-	}
-
-	return sock;
-}
-
-int connect_socket(const char *ip_addr, short port)
-{
-	int sock;
-	struct sockaddr_in sock_adr;
-	
-	sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock == -1)
-		return -1;
-
-	memset(&sock_adr, 0, sizeof(struct sockaddr_in));
-	sock_adr.sin_family = AF_INET;
-	sock_adr.sin_addr.s_addr = inet_addr(ip_addr);
-	sock_adr.sin_port = htons(port);
-
-	if (connect(sock, (struct sockaddr*)&sock_adr, sizeof(sock_adr)) == -1) {
-		close(sock);
-		return -2;
-	}
-
-	return sock;
-}
-
-int nonblocking(int fd)
-{
-	int flag;
-
-	if (fcntl(fd, F_SETOWN, getpid()) == -1)
-		return -1;
-
-	flag = fcntl(fd, F_GETFL, 0);
-	if (fcntl(fd, F_SETFL, flag | O_NONBLOCK) == -1)
-		return -2;
-
-	return 0;
-}
-
-int register_epoll_struct(struct epoll_struct *epoll_struct, int sock_fd, int opt)
-{	
-	if (epoll_ctl(
-			epoll_struct->epoll_fd, 
-			EPOLL_CTL_ADD, 
-			sock_fd, 
-			&(struct epoll_event){ .events = opt }
-		) == -1)
-		return -1;
-
-	return 0;
-}
-
-int create_epoll_struct(struct epoll_struct *ep_struct, size_t epoll_size)
-{
-	struct epoll_event *ep_events;
-	int epfd;
-
-	epfd = epoll_create(epoll_size);
-	if (epfd == -1)
-		return -1;
-
-	ep_events = malloc(sizeof(struct epoll_event) * epoll_size);
-	if (ep_events == NULL)
-		return -2;
-
-	ep_struct->epoll_fd = epfd;
-	ep_struct->ep_events = ep_events;
-
-	return 0;
-}
-
-void release_epoll_struct(struct epoll_struct *ep_struct)
-{
-	close(ep_struct->epoll_fd);
-	free(ep_struct->ep_events);
 }
