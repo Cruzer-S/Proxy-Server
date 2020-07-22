@@ -20,22 +20,18 @@
 
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
+#define BUF_SIZE	(1024)
 
 typedef void Sigfunc(int);
-
-struct epoll_struct {
-	struct epoll_event *ep_events;
-	int epoll_fd;
-};
 
 struct event_struct {
 	int pipe_fd[2];
 };
 
 struct thread_args {
-	struct epoll_event *ep_struct;
-	struct event_struct *ev_struct;
-	int proxy_sock;
+	struct epoll_struct ep_struct;
+	int epoll_size;
+	int buf_size;
 };
 
 void *worker_thread(void *);
@@ -57,9 +53,12 @@ int main(int argc, char *argv[])
 	struct epoll_struct ep_struct_stoc;	//server to client
 	struct epoll_struct ep_struct_ctos;	//client to server
 
-	int ret;
+	struct thread_args thd_arg;
 
-	pthread_t tid1, tid2;
+	pthread_t tid_stoc;
+	pthread_t tid_ctos;
+
+	int ret;
 
 	if (argc != 4)
 		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -79,7 +78,16 @@ int main(int argc, char *argv[])
 	if ( (ret = create_epoll_struct(&ep_struct_ctos, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
 
-	if (pthread_create(&tid1, NULL, worker_thread, ))		
+	thd_arg.epoll_size = EPOLL_SIZE;
+	thd_arg.buf_size = BUF_SIZE;
+
+	thd_arg.ep_struct = ep_struct_stoc;
+	if (pthread_create(&tid_stoc, NULL, worker_thread, &thd_arg) != 0)
+		err_msg("pthread_create(stoc) error", ERR_CTC);
+
+	thd_arg.ep_struct = ep_struct_ctos;
+	if (pthread_create(&tid_ctos, NULL, worker_thread, &thd_arg) != 0)
+		err_msg("pthread_create(ctos) error", ERR_CTC);
 
 	while (true)
 	{
@@ -91,7 +99,7 @@ int main(int argc, char *argv[])
 		if (clnt_sock == -1) {
 			err_msg("accept() error", ERR_CHK);
 			continue;
-		} else {
+		} else { 
 			if ( (ret = nonblocking(clnt_sock)) != 0) {
 				close(clnt_sock);
 				err_msg("nonblocking() error: %d ", ERR_CHK, ret);
@@ -105,8 +113,26 @@ int main(int argc, char *argv[])
 			close(clnt_sock);
 			continue;
 		} else {
-			if (register_epoll_struct(&ep_struct_stoc, serv_sock, EPOLLIN | EPOLLET) != 0
-			||	register_epoll_struct(&ep_struct_ctos, clnt_sock, EPOLLIN | EPOLLET) != 0) {
+			ev_data.pipe_fd[0] = serv_sock;
+			ev_data.pipe_fd[1] = clnt_sock;
+			if (register_epoll_struct(
+				 &ep_struct_stoc, serv_sock, 
+				 EPOLLIN | EPOLLET, ev_data, 
+				 sizeof(struct event_struct)) != 0)
+			{
+				close(clnt_sock);
+				close(serv_sock);
+
+				continue;
+			}
+
+			ev_data.pipe_fd[0] = clnt_sock;
+			ev_data.pipe_fd[1] = serv_sock;
+			if (register_epoll_struct(
+				 &ep_struct_ctos, proxy_sock,
+				 EPOLLIN | EPOLLET, ev_data,
+				 sizeof(struct event_struct)) != 0)
+			{
 				close(clnt_sock);
 				close(serv_sock);
 
@@ -125,6 +151,39 @@ int main(int argc, char *argv[])
 
 void *worker_thread(void *args)
 {
+	struct thread_args thd_arg = *(struct thread_args*)args;
+
+	struct epoll_event *ep_event = thd_arg.ep_event;
+	int epoll_size = thd_arg.epoll_size;
+	struct epoll_event event;
+	
+	struct event_struct ev_struct;
+
+	int event_cnt;
+
+	int buf_size = thd_arg.buf_size;
+	char buf[buf_size];
+	
+	for(;;)
+	{
+		event_cnt = epoll_wait(epfd, ep_events, epoll_size, -1);
+		if (event_cnt == -1) {
+			err_msg("epoll_wait() error", ERR_CHK);
+			break;
+		}
+
+		for (int i = 0; i < event_cnt; i++)
+		{
+			ev_struct = *(struct event_struct)ep_events[i].data.ptr;
+			str_len = read(ev_struct.pipe_fd[0], buf, buf_size);
+
+			if (str_len == 0)
+			{
+				
+			}
+		}
+	}
+
 	return (void *)0;
 }
 
