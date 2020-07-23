@@ -30,7 +30,6 @@ struct event_struct {
 
 struct thread_args {
 	struct epoll_struct ep_struct;
-	int epoll_size;
 	int buf_size;
 };
 
@@ -78,7 +77,6 @@ int main(int argc, char *argv[])
 	if ( (ret = create_epoll_struct(&ep_struct_ctos, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
 
-	thd_arg.epoll_size = EPOLL_SIZE;
 	thd_arg.buf_size = BUF_SIZE;
 
 	thd_arg.ep_struct = ep_struct_stoc;
@@ -126,7 +124,7 @@ int main(int argc, char *argv[])
 				continue;
 			}
 
-			ev_data.pipe_fd[0] = clnt_sock;
+			ev_data.pipe_fd[0] = proxy_sock;
 			ev_data.pipe_fd[1] = serv_sock;
 			if (register_epoll_struct(
 				 &ep_struct_ctos, proxy_sock,
@@ -179,7 +177,9 @@ void *worker_thread(void *args)
 
 			if (str_len == 0)
 			{
-				
+				epoll_ctl(epfd, ev_struct.pipe_fd[0], NULL);
+				close(ev_struct.pipe_fd[0]);
+				printf("closed client: %d \n", ep_events[i].data.fd);
 			}
 		}
 	}

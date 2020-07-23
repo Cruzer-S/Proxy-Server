@@ -83,11 +83,9 @@ int nonblocking(int fd)
 int release_epoll_struct(struct epoll_struct *ep_struct, int sock, void *data)
 {
 	struct epoll_event event;
-
-	event = ep_struct-> 
 }
 
-int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, void *data, size_t data_size)
+int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, size_t data_size)
 { 
 	struct epoll_event event;
 
@@ -96,15 +94,13 @@ int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, voi
 	if (event.data.ptr == NULL)
 		return -1;
 
-	memcpy(event.data.ptr, data, data_size);
-
 	if (epoll_ctl(ep_struct->epoll_fd, EPOLL_CTL_ADD, sock, &event) == -1)
 		return -2;
 
 	return 0;
 }
 
-int create_epoll_struct(struct epoll_struct *ep_struct, size_t epoll_size)
+int create_epoll_struct(struct epoll_struct *ep_struct, int epoll_size)
 {
 	struct epoll_event *ep_events;
 	int epfd;
@@ -119,6 +115,7 @@ int create_epoll_struct(struct epoll_struct *ep_struct, size_t epoll_size)
 
 	ep_struct->epoll_fd = epfd;
 	ep_struct->ep_events = ep_events;
+	ep_struct->epoll_size = epoll_size;
 
 	return 0;
 }

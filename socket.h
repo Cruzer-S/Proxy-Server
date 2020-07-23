@@ -7,7 +7,10 @@
 
 struct epoll_struct {
 	struct epoll_event *ep_events;
+	int epoll_size;
 	int epoll_fd;
+
+	int check_socket;
 };
 
 void show_address(const char *, struct sockaddr_in *, const char *);
@@ -18,9 +21,9 @@ int connect_socket(const char *, short );
 
 int nonblocking(int );
 
-int create_epoll_struct(struct epoll_struct *, size_t );
+int create_epoll_struct(struct epoll_struct *, int );
 
-int register_epoll_struct(struct epoll_struct *,int ,int , void *, size_t );
+int register_epoll_struct(struct epoll_struct *,int ,int , size_t );
 
 void release_epoll_struct(struct epoll_struct *);
 
