@@ -174,12 +174,19 @@ void *worker_thread(void *args)
 		{
 			ev_struct = *(struct event_struct)ep_events[i].data.ptr;
 			str_len = read(ev_struct.pipe_fd[0], buf, buf_size);
+			if (str_len == -1)
+				err_msg("read() error", ERR_CHK);
 
-			if (str_len == 0)
-			{
-				epoll_ctl(epfd, ev_struct.pipe_fd[0], NULL);
+			if (str_len == 0) {
+				epoll_ctl(epfd, EPOLL_CTL_DEL, ev_struct.pipe_fd[0], NULL);
 				close(ev_struct.pipe_fd[0]);
+
+				free(ev_struct);
+
 				printf("closed client: %d \n", ep_events[i].data.fd);
+			} else {
+				if (write(ev_struct.pipe_fd[1], buf, str_len) == -1)
+					err_msg("write() error", ERR_CHK);
 			}
 		}
 	}
