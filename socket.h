@@ -11,6 +11,7 @@ struct epoll_struct {
 	int epoll_fd;
 
 	int check_socket;
+	pthread_mutex_t mutex;
 };
 
 void show_address(const char *, struct sockaddr_in *, const char *);
