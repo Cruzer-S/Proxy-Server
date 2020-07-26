@@ -85,7 +85,7 @@ int release_epoll_struct(struct epoll_struct *ep_struct, int sock, void *data)
 	struct epoll_event event;
 }
 
-int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, size_t data_size)
+int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, void *data, size_t data_size)
 { 
 	struct epoll_event event;
 
@@ -96,6 +96,8 @@ int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, siz
 
 	if (event.data.ptr == NULL)
 		return -1;
+
+	memcpy(event.data.ptr, data, data_size);
 
 	if (epoll_ctl(ep_struct->epoll_fd, EPOLL_CTL_ADD, sock, &event) == -1)
 		return -2;

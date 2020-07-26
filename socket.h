@@ -24,7 +24,7 @@ int nonblocking(int );
 
 int create_epoll_struct(struct epoll_struct *, int );
 
-int register_epoll_struct(struct epoll_struct *,int ,int , size_t );
+int register_epoll_struct(struct epoll_struct *,int ,int , void *, size_t );
 
 void release_epoll_struct(struct epoll_struct *);
 
