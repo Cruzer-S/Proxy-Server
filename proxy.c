@@ -117,12 +117,7 @@ int main(int argc, char *argv[])
 				 &ep_struct_stoc, serv_sock, 
 				 EPOLLIN | EPOLLET, ev_data, 
 				 sizeof(struct event_struct)) != 0)
-			{
-				close(clnt_sock);
-				close(serv_sock);
-
-				continue;
-			}
+				goto CLOSE_SOCKET;
 
 			ev_data.pipe_fd[0] = proxy_sock;
 			ev_data.pipe_fd[1] = serv_sock;
@@ -131,11 +126,14 @@ int main(int argc, char *argv[])
 				 EPOLLIN | EPOLLET, ev_data,
 				 sizeof(struct event_struct)) != 0)
 			{
-				close(clnt_sock);
-				close(serv_sock);
+				release_epoll_struct(&ep_struct, serv_sock, ev_data);
 
-				continue;
+				goto CLOSE_SOCKET;
 			}
+
+CLOSE_SOCKET:
+			close(clnt_sock);
+			close(serv_sock);
 		}
 
 		show_address("client address: ", &clnt_adr, " \n");

@@ -91,7 +91,7 @@ int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, siz
 
 	pthread_mutex_lock(&ep_struct->mutex);
 	event.events = opt;
-	event.data.ptr = malloc(data_size);
+	event.data.ptr = malloc(data_size);	//non-thread-safety
 	pthread_mutex_unlock(&ep_struct->mutex);
 
 	if (event.data.ptr == NULL)
@@ -122,7 +122,7 @@ int create_epoll_struct(struct epoll_struct *ep_struct, int epoll_size)
 	ep_struct->ep_events = ep_events;
 	ep_struct->epoll_size = epoll_size;
 
-	if ((err = pthread_mutex_init(&mutex, NULL))!= 0)
+	if ( (err = pthread_mutex_init(&mutex, NULL)) != 0 )
 		return -3;
 
 	return 0;
