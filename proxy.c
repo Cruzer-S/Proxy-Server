@@ -18,6 +18,8 @@
 #include "err_hdl.h"
 #include "socket.h"
 
+#include "atomic_style.h"
+
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
 #define BUF_SIZE	(1024)
