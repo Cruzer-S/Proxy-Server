@@ -9,12 +9,18 @@ void show_address(const char *start_string, struct sockaddr_in* addr, const char
 		inet_ntop(	
 			AF_INET, &(addr->sin_addr),
 			(char [INET_ADDRSTRLEN]) { /* empty */ },
-			INET_ADDRSTRLEN),
+			INET_ADDRSTRLEN
+		), 
 		//port number
 		ntohs(addr->sin_port),
 		//end string
 		end_string
 	);
+}
+
+int accept_socket(int sock, struct sockaddr* sock_adr, int *adr_size)
+{
+	struct sockaddr_in sock
 }
 
 int listen_socket(short port, int backlog)
@@ -80,30 +86,7 @@ int nonblocking(int fd)
 	return 0;
 }
 
-int release_epoll_struct(struct epoll_struct *ep_struct, int sock, void *data)
-{
-	struct epoll_event event;
-}
-
-int register_epoll_struct(struct epoll_struct *ep_struct, int sock, int opt, size_t data_size)
-{ 
-	struct epoll_event event;
-
-	pthread_mutex_lock(&ep_struct->mutex);
-	event.events = opt;
-	event.data.ptr = malloc(data_size);	//non-thread-safety
-	pthread_mutex_unlock(&ep_struct->mutex);
-
-	if (event.data.ptr == NULL)
-		return -1;
-
-	if (epoll_ctl(ep_struct->epoll_fd, EPOLL_CTL_ADD, sock, &event) == -1)
-		return -2;
-
-	return 0;
-}
-
-int create_epoll_struct(struct epoll_struct *ep_struct, int epoll_size)
+int create_epoll_handler(struct epoll_handler *ep_handler, int epoll_size)
 {
 	struct epoll_event *ep_events;
 
@@ -118,20 +101,60 @@ int create_epoll_struct(struct epoll_struct *ep_struct, int epoll_size)
 	if (ep_events == NULL)
 		return -2;
 
-	ep_struct->epoll_fd = epfd;
-	ep_struct->ep_events = ep_events;
-	ep_struct->epoll_size = epoll_size;
+	ep_handler->epoll_fd = epfd;
+	ep_handler->ep_events = ep_events;
+	ep_handler->epoll_size = epoll_size;
 
-	if ( (err = pthread_mutex_init(&mutex, NULL)) != 0 )
-		return -3;
+	ep_handler->cur_event = -1;
+	ep_handler->get_event = -1;
 
 	return 0;
 }
 
-void release_epoll_struct(struct epoll_struct *ep_struct)
-{
-	pthread_mutex_unlock(&ep_struct->mutex);
+int register_epoll_handler(struct epoll_handler *ep_handler, int sock, int opt, void *data)
+{ 
+	struct epoll_event event;
 
-	close(ep_struct->epoll_fd);
-	free(ep_struct->ep_events);
+	event.events = opt;
+	event.data.ptr = data;
+	if (epoll_ctl(ep_handler->epoll_fd, EPOLL_CTL_ADD, sock, &event) == -1)
+		return -1;
+
+	return 0;
+}
+
+int wait_epoll_handler(struct epoll_handler *ep_handler)
+{
+	ep_handler->cur_event = 0;
+
+	return (ep_handler->get_event = epoll_wait(
+		ep_handler->epoll_fd, 
+		ep_handler->ep_events, 
+		ep_handler->ep_size, -1
+	));
+}
+
+void *get_epoll_handler(struct epoll_handler *ep_handler)
+{
+	int cur = ep_handler->cur_event;
+	int get = ep_handler->get_event;
+
+	if (cur <= 0 || get <= 0 || cur >= get)
+		return NULL;
+
+	return ep_handler->ep_events[ep_handler->cur_event++];
+}
+
+int release_epoll_handler(struct epoll_handler *ep_handler, int sock)
+{
+	if (epoll_ctl(ep_handler->epoll_fd, EPOLL_CTL_DEL, sock, NULL) == -1)
+		return -1;
+
+	return 0;
+}
+
+void delete_epoll_handler(struct epoll_struct *ep_handler)
+{
+	close(ep_handler->epoll_fd);
+	free(ep_handler->ep_events);
 }

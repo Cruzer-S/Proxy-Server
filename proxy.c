@@ -30,11 +30,6 @@ struct event_struct {
 	int pipe_fd[2];
 };
 
-struct thread_args {
-	struct epoll_struct ep_struct;
-	int buf_size;
-};
-
 void *worker_thread(void *);
 
 void sig_usr1(int );
@@ -48,51 +43,39 @@ int main(int argc, char *argv[])
 	int proxy_sock, serv_sock, clnt_sock;
 	struct sockaddr_in clnt_adr;
 
-	int epoll_fd1, epoll_fd2;
-	struct event_struct ev_data;
-
-	struct epoll_struct ep_struct_stoc;	//server to client
-	struct epoll_struct ep_struct_ctos;	//client to server
-
-	struct thread_args thd_arg;
-
-	pthread_t tid_stoc;
-	pthread_t tid_ctos;
+	struct epoll_handler ep_stoc, ep_ctos;	//server to client, client to server
 
 	int ret;
 
-	if (argc != 4)
-		err_msg("usage: %s <port> <server_ip> <server_port>", ERR_DNG, argv[0]);
+	if (argc != 4) {
+		err_msg("usage: %s <proxy_port> <server_ip> <server_port>", ERR_DNG, argv[0]);
+	} else {
+		printf("proxy port: %s \n", argv[1]);
+		printf("server address: %s:%s \n", argv[2], argv[3]);
 
-	printf("server address: %s:%s \n", argv[2], argv[3]);
+		if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
+			err_msg("sigset() error", ERR_CTC);
+	}
 
 	proxy_sock = listen_socket(atoi(argv[1]), BLOG);
 	if (proxy_sock < 0)
 		err_msg("listen_sock() error: %d", ERR_CTC, proxy_sock);
 
-	if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
-		err_msg("sigset() error", ERR_CTC);
-
-	if ( (ret = create_epoll_struct(&ep_struct_stoc, EPOLL_SIZE)) != 0)
+	if ( (ret = create_epoll_handler(&ep_stoc, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(stoc) error: %d", ERR_CTC, ret);
 	
-	if ( (ret = create_epoll_struct(&ep_struct_ctos, EPOLL_SIZE)) != 0)
+	if ( (ret = create_epoll_handler(&ep_ctos, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
 
-	thd_arg.buf_size = BUF_SIZE;
-
-	thd_arg.ep_struct = ep_struct_stoc;
-	if (pthread_create(&tid_stoc, NULL, worker_thread, &thd_arg) != 0)
-		err_msg("pthread_create(stoc) error", ERR_CTC);
-
-	thd_arg.ep_struct = ep_struct_ctos;
-	if (pthread_create(&tid_ctos, NULL, worker_thread, &thd_arg) != 0)
-		err_msg("pthread_create(ctos) error", ERR_CTC);
+	if ((pthread_create(&tid_stoc, NULL, worker_thread, (void *)epoll_handler) != 0)
+	||	(pthread_create(&tid_ctos, NULL, worker_thread, (void *)epoll_handler) != 0))
+		err_msg("pthread_create() error", ERR_CTC);
 
 	while (true)
 	{
 		clnt_sock = accept(
-			proxy_sock, (struct sockaddr*)&clnt_adr, 
+			proxy_sock, 
+			(struct sockaddr*)&clnt_adr, 
 			(int []) { sizeof(clnt_adr) }
 		);
 
@@ -112,26 +95,14 @@ int main(int argc, char *argv[])
 			err_msg("connect_socket() error: %d", ERR_CHK, serv_sock);
 			close(clnt_sock);
 			continue;
-		} else {
-			ev_data.pipe_fd[0] = serv_sock;
-			ev_data.pipe_fd[1] = clnt_sock;
-			if (register_epoll_struct(
-				 &ep_struct_stoc, serv_sock, 
-				 EPOLLIN | EPOLLET, ev_data, 
-				 sizeof(struct event_struct)) != 0)
-				goto CLOSE_SOCKET;
 
-			ev_data.pipe_fd[0] = proxy_sock;
-			ev_data.pipe_fd[1] = serv_sock;
-			if (register_epoll_struct(
-				 &ep_struct_ctos, proxy_sock,
-				 EPOLLIN | EPOLLET, ev_data,
-				 sizeof(struct event_struct)) != 0)
-			{
-				release_epoll_struct(&ep_struct, serv_sock, ev_data);
+		}
+		
+		if (register_epoll_struct(&ep_struct_stoc, serv_sock) != 0)
+			goto CLOSE_SOCKET;
 
-				goto CLOSE_SOCKET;
-			}
+		if (register_epoll_struct(&ep_struct_ctos, proxy_sock) != 0)
+			goto CLOSE_SOCKET;
 
 CLOSE_SOCKET:
 			close(clnt_sock);
@@ -149,25 +120,16 @@ CLOSE_SOCKET:
 
 void *worker_thread(void *args)
 {
-	struct thread_args thd_arg = *(struct thread_args*)args;
+	struct epoll_handler *handler = (struct epoll_handler*)args;
 
-	struct epoll_event *ep_event = thd_arg.ep_event;
-	int epoll_size = thd_arg.epoll_size;
-	struct epoll_event event;
-	
-	struct event_struct ev_struct;
-
-	int event_cnt;
-
-	int buf_size = thd_arg.buf_size;
-	char buf[buf_size];
+	int cnt;
 	
 	for(;;)
 	{
-		event_cnt = epoll_wait(epfd, ep_events, epoll_size, -1);
-		if (event_cnt == -1) {
-			err_msg("epoll_wait() error", ERR_CHK);
-			break;
+		cnt = wait_epoll_handler(handler);
+		if (cnt == -1) {
+			err_msg("wait_epoll_handler() error: %d", ERR_CHK, cnt);
+			continue;
 		}
 
 		for (int i = 0; i < event_cnt; i++)
@@ -220,25 +182,4 @@ Sigfunc *sigset(int signo, Sigfunc *func)
 		return SIG_ERR;
 
 	return (oact.sa_handler);
-}
-
-long open_max(void)
-{
-#ifdef OPEN_MAX
-long openmax = OPEN_MAX;
-#else
-#define OPEN_MAX_GUESS 1024
-long openmax = 0;
-#endif
-	if (openmax == 0) {
-		errno = 0;
-		if ((openmax = sysconf(_SC_OPEN_MAX)) < 0) {
-			if (errno == 0)
-				openmax = OPEN_MAX_GUESS;
-			else
-				err_msg("sysconf error for _SC_OPEN_MAX", ERR_CTC);
-		}
-	}
-
-	return openmax;
 }
