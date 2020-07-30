@@ -15,8 +15,9 @@
 #include <sys/socket.h>
 #include <sys/epoll.h>
 
-#include "err_hdl.h"
-#include "socket.h"
+#include "handler/error.h"
+#include "handler/socket.h"
+#include "handler/signal.h"
 
 #include "atomic_style.h"
 
@@ -36,8 +37,6 @@ void sig_usr1(int );
 
 Sigfunc *sigset(int , Sigfunc *);
 
-long open_max(void);
-
 int main(int argc, char *argv[])
 {
 	int proxy_sock, serv_sock, clnt_sock;
@@ -46,6 +45,8 @@ int main(int argc, char *argv[])
 	struct epoll_handler ep_stoc, ep_ctos;	//server to client, client to server
 
 	int ret;
+
+	void *ptr;
 
 	if (argc != 4) {
 		err_msg("usage: %s <proxy_port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -94,17 +95,32 @@ int main(int argc, char *argv[])
 		if( (serv_sock = connect_socket(argv[2], atoi(argv[3]))) < 0) {
 			err_msg("connect_socket() error: %d", ERR_CHK, serv_sock);
 			close(clnt_sock);
-			continue;
 
+			continue;
 		}
 		
-		if (register_epoll_struct(&ep_struct_stoc, serv_sock) != 0)
-			goto CLOSE_SOCKET;
+		void *ptr = malloc(sizeof(struct event_struct) * 2);
+		if (ptr == NULL) { 
+			err_msg("malloc(event_struct) error", ERR_CHK);
+			continue;
+		}
+		
+		if (register_epoll_struct(
+				&ep_stoc, serv_sock, 
+				EPOLLIN | EPOLLET, 
+				ptr + 0) != 0) {
+			
+			close(clnt_sock);
+			close(serv_sock);
+		}
 
-		if (register_epoll_struct(&ep_struct_ctos, proxy_sock) != 0)
-			goto CLOSE_SOCKET;
+		if (register_epoll_struct(
+				&ep_ctos, proxy_sock, 
+				EPOLLIN | EPOLLET,
+				ptr + sizeof(struct event_struct)) != 0) {
+			
+			release_epoll_handler(&ep_stoc, serv_sock);
 
-CLOSE_SOCKET:
 			close(clnt_sock);
 			close(serv_sock);
 		}

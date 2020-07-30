@@ -40,8 +40,8 @@ int listen_socket(short port, int backlog)
 	if (bind(sock, (struct sockaddr*) &sock_adr, sizeof(struct sockaddr_in)) == -1) {
 		close(sock);
 		return -2;
-	}
-
+	} 
+	
 	if (listen(sock, backlog) == -1) {
 		close(sock);
 		return -3;
