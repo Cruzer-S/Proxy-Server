@@ -117,6 +117,7 @@ int register_epoll_handler(struct epoll_handler *ep_handler, int sock, int opt, 
 
 	event.events = opt;
 	event.data.ptr = data;
+	
 	if (epoll_ctl(ep_handler->epoll_fd, EPOLL_CTL_ADD, sock, &event) == -1)
 		return -1;
 

@@ -18,8 +18,7 @@
 #include "handler/error.h"
 #include "handler/socket.h"
 #include "handler/signal.h"
-
-#include "atomic_style.h"
+#include "handler/atomic.h"
 
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
@@ -27,7 +26,7 @@
 
 typedef void Sigfunc(int);
 
-struct event_struct {
+struct event_data {
 	int pipe_fd[2];
 };
 
@@ -41,6 +40,8 @@ int main(int argc, char *argv[])
 {
 	int proxy_sock, serv_sock, clnt_sock;
 	struct sockaddr_in clnt_adr;
+
+	struct event_data *ev_data;
 
 	struct epoll_handler ep_stoc, ep_ctos;	//server to client, client to server
 
@@ -63,16 +64,16 @@ int main(int argc, char *argv[])
 		err_msg("listen_sock() error: %d", ERR_CTC, proxy_sock);
 
 	if ( (ret = create_epoll_handler(&ep_stoc, EPOLL_SIZE)) != 0)
-		err_msg("create_epoll_struct(stoc) error: %d", ERR_CTC, ret);
+		err_msg("create_epoll_handler(stoc) error: %d", ERR_CTC, ret);
 	
 	if ( (ret = create_epoll_handler(&ep_ctos, EPOLL_SIZE)) != 0)
-		err_msg("create_epoll_struct(ctos) error: %d", ERR_CTC, ret);
+		err_msg("create_epoll_handler(ctos) error: %d", ERR_CTC, ret);
 
-	if ((pthread_create(&tid_stoc, NULL, worker_thread, (void *)epoll_handler) != 0)
-	||	(pthread_create(&tid_ctos, NULL, worker_thread, (void *)epoll_handler) != 0))
+	if ((pthread_create(&tid_stoc, NULL, worker_thread, (void *)ep_stoc) != 0)
+	||	(pthread_create(&tid_ctos, NULL, worker_thread, (void *)ep_ctos) != 0))
 		err_msg("pthread_create() error", ERR_CTC);
 
-	while (true)
+	for (;;)
 	{
 		clnt_sock = accept(
 			proxy_sock, 
@@ -99,34 +100,44 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		
-		void *ptr = malloc(sizeof(struct event_struct) * 2);
+		ev_data = malloc(sizeof(struct event_data) * 2);
 		if (ptr == NULL) { 
-			err_msg("malloc(event_struct) error", ERR_CHK);
+			err_msg("malloc(event_data) error", ERR_CHK);
 			continue;
 		}
-		
-		if (register_epoll_struct(
+
+		ev_data[0].pipe_fd[0] = serv_sock;
+		ev_data[0].pipe_fd[1] = clnt_sock;
+		if (register_epoll_handler(
 				&ep_stoc, serv_sock, 
 				EPOLLIN | EPOLLET, 
 				ptr + 0) != 0) {
-			
-			close(clnt_sock);
-			close(serv_sock);
+
+			goto FAILED_TO_REGISTER;
 		}
 
-		if (register_epoll_struct(
+		ev_data[1].pipe_fd[0] = proxy_sock;
+		ev_data[1].pipe_fd[1] = serv_sock;
+		if (register_epoll_handler(
 				&ep_ctos, proxy_sock, 
 				EPOLLIN | EPOLLET,
-				ptr + sizeof(struct event_struct)) != 0) {
+				ptr + sizeof(struct event_data)) != 0) {
 			
 			release_epoll_handler(&ep_stoc, serv_sock);
 
-			close(clnt_sock);
-			close(serv_sock);
+			goto FAILED_TO_REGISTER;
 		}
 
 		show_address("client address: ", &clnt_adr, " \n");
 		printf("connect client successfully \n");
+
+		continue; 
+		
+		FAILED_TO_REGISTER:
+		close(clnt_sock);
+		close(serv_sock);
+
+		free(ev_data);
 	}
 
 	close(proxy_sock);
@@ -136,9 +147,11 @@ int main(int argc, char *argv[])
 
 void *worker_thread(void *args)
 {
-	struct epoll_handler *handler = (struct epoll_handler*)args;
+	struct epoll_handler *handler = (struct epoll_handler *)args;
+	struct event_data *ev_data;
+	int str_len, cnt;
 
-	int cnt;
+	int buf[BUF_SIZE];
 	
 	for(;;)
 	{
@@ -150,21 +163,30 @@ void *worker_thread(void *args)
 
 		for (int i = 0; i < event_cnt; i++)
 		{
-			ev_struct = *(struct event_struct)ep_events[i].data.ptr;
-			str_len = read(ev_struct.pipe_fd[0], buf, buf_size);
-			if (str_len == -1)
+			ev_data = (struct event_data *)get_epoll_handler(handler);
+
+			if (ev_data == NULL) {
+				err_msg("get_epoll_handler() error", ERR_CHK);
+				continue;
+			}
+
+			str_len = read(ev_data->pipe_fd[0], buf, BUF_SIZE);
+			if (str_len == -1) {
 				err_msg("read() error", ERR_CHK);
+				continue;
+			}
 
 			if (str_len == 0) {
-				epoll_ctl(epfd, EPOLL_CTL_DEL, ev_struct.pipe_fd[0], NULL);
-				close(ev_struct.pipe_fd[0]);
+				release_epoll_handler(handler, ev_data->pipe_fd[0]);
+				
+				close(ev_data->pipe_fd[0]);
+				close(ev_data->pipe_fd[1]);
 
-				free(ev_struct);
+				free(ev_data);
 
 				printf("closed client: %d \n", ep_events[i].data.fd);
 			} else {
-				if (write(ev_struct.pipe_fd[1], buf, str_len) == -1)
-					err_msg("write() error", ERR_CHK);
+				write(ev_data->pipe_fd[1], buf, BUF_SIZE);
 			}
 		}
 	}
