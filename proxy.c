@@ -40,6 +40,7 @@ int main(int argc, char *argv[])
 
 	struct epoll_handler ep_stoc, ep_ctos;	//server to client, client to server
 
+	pthread_t tid_stoc, tid_ctos;
 	int ret;
 
 	void *ptr;
@@ -67,8 +68,10 @@ int main(int argc, char *argv[])
 	if ( (ret = create_epoll_handler(&ep_ctos, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_handler(ctos) error: %d", ERR_CTC, ret);
 
-	if ((pthread_create(&tid_stoc, NULL, worker_thread, (void *)ep_stoc) != 0)
-	||	(pthread_create(&tid_ctos, NULL, worker_thread, (void *)ep_ctos) != 0))
+	if (pthread_create(&tid_stoc, NULL, worker_thread, (void *)&ep_stoc) != 0)
+		err_msg("pthread_create() error", ERR_CTC);
+	
+	if (pthread_create(&tid_ctos, NULL, worker_thread, (void *)&ep_ctos) != 0)
 		err_msg("pthread_create() error", ERR_CTC);
 
 	for (;;)
@@ -160,7 +163,7 @@ void *worker_thread(void *args)
 			continue;
 		}
 
-		for (int i = 0; i < event_cnt; i++)
+		for (int i = 0; i < cnt; i++)
 		{
 			ev_data = (struct event_data *)get_epoll_handler(handler);
 
@@ -183,7 +186,7 @@ void *worker_thread(void *args)
 
 				free(ev_data);
 
-				printf("closed client: %d \n", ep_events[i].data.fd);
+				printf("closed client: %d \n", ev_data->pipe_fd[0]);
 			} else {
 				write(ev_data->pipe_fd[1], buf, BUF_SIZE);
 			}

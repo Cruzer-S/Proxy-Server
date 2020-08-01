@@ -1,4 +1,4 @@
-#define "atomic.h"
+#include "atomic.h"
 
 static pthread_mutex_t mutex_alloc, mutex_print;
 

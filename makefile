@@ -1,19 +1,27 @@
 CC = gcc
 CFLAGS = -pthread
 
-TARGET1 = proxy.out
-OBJECTS1 = proxy.o err_hdl.o
+TARGET_PROXY = proxy_server
+OBJECTS_PROYX = 		\
+	proxy.o 			\
+	handler/error.o		\
+	handler/atomic.o	\
+	handler/socket.o 	\
 
-TARGET2 = client.out
-OBJECTS2 = client.o err_hdl.o
+TARGET_CLIENT = client
+OBJECTS_CLIENT = 		\
+	client.o			\
+	handler/error.o		\
 
-all : $(TARGET2) $(TARGET1)
+TARGET_SERVER = web_server
+OBJECTS_SERVER = 		\
+	server.o			\
+	handler/error.o		\
 
-$(TARGET2): $(OBJECTS2)
+all : $(TARGET_PROXY)
+
+$(TARGET_PROXY) : $(OBJECTS_PROYX)
 	$(CC) $(CFLAGS) -o $@ $^
 
-$(TARGET1): $(OBJECTS1)
-	$(CC) $(CFLAGS) -o $@ $^
-
-clean: 
-	rm *.o *.out
+clean:
+	rm $(TARGET_SERVER) $(OBJECTS_PROYX)

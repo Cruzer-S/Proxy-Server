@@ -1,6 +1,6 @@
-#define "socket.h"
+#include "socket.h"
 
-void show_address(const char *start_string, struct sockaddr_in* addr, const char *end_string)
+void show_address(const char *start_string, struct sockaddr_in *addr, const char *end_string)
 {
 	printf("%s%s:%hd%s", 
 		//start string
@@ -16,11 +16,6 @@ void show_address(const char *start_string, struct sockaddr_in* addr, const char
 		//end string
 		end_string
 	);
-}
-
-int accept_socket(int sock, struct sockaddr* sock_adr, int *adr_size)
-{
-	struct sockaddr_in sock
 }
 
 int listen_socket(short port, int backlog)
@@ -131,7 +126,7 @@ int wait_epoll_handler(struct epoll_handler *ep_handler)
 	return (ep_handler->get_event = epoll_wait(
 		ep_handler->epoll_fd, 
 		ep_handler->ep_events, 
-		ep_handler->ep_size, -1
+		ep_handler->epoll_size, -1
 	));
 }
 
@@ -143,7 +138,7 @@ void *get_epoll_handler(struct epoll_handler *ep_handler)
 	if (cur <= 0 || get <= 0 || cur >= get)
 		return NULL;
 
-	return ep_handler->ep_events[ep_handler->cur_event++];
+	return (void *)&ep_handler->ep_events[ep_handler->cur_event++];
 }
 
 int release_epoll_handler(struct epoll_handler *ep_handler, int sock)
@@ -154,7 +149,7 @@ int release_epoll_handler(struct epoll_handler *ep_handler, int sock)
 	return 0;
 }
 
-void delete_epoll_handler(struct epoll_struct *ep_handler)
+void delete_epoll_handler(struct epoll_handler *ep_handler)
 {
 	close(ep_handler->epoll_fd);
 	free(ep_handler->ep_events);

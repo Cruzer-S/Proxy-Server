@@ -1,5 +1,5 @@
-#ifndef __ERR_HDL_H__
-#define __ERR_HDL_H__
+#ifndef __ERROR_H__
+#define __ERROR_H__
 
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "err_hdl.h"
+#include "error.h"
 
 void err_msg(const char *fmt_msg, int type, ...)
 {

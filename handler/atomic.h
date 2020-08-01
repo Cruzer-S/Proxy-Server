@@ -12,7 +12,7 @@ int init_atomic_alloc(void);
 
 void *atomic_alloc(size_t );
 
-void atomic_free(vodi *);
+void atomic_free(void *);
 
 void atomic_print(const char *, ...);
 
