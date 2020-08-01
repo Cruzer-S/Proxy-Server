@@ -6,7 +6,6 @@
 
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <errno.h>
 
 #include <pthread.h>
@@ -24,17 +23,13 @@
 #define EPOLL_SIZE	(50)
 #define BUF_SIZE	(1024)
 
-typedef void Sigfunc(int);
-
-struct event_data {
-	int pipe_fd[2];
-};
-
 void *worker_thread(void *);
 
 void sig_usr1(int );
 
-Sigfunc *sigset(int , Sigfunc *);
+struct event_data {
+	int pipe_fd[2];
+};
 
 int main(int argc, char *argv[])
 {
@@ -57,6 +52,9 @@ int main(int argc, char *argv[])
 
 		if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
 			err_msg("sigset() error", ERR_CTC);
+
+		if (init_atomic_alloc() == -1)
+			err_msg("init_atomic_alloc() error", ERR_CTC);
 	}
 
 	proxy_sock = listen_socket(atoi(argv[1]), BLOG);
@@ -100,7 +98,7 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		
-		ev_data = malloc(sizeof(struct event_data) * 2);
+		ev_data = atomic_alloc(sizeof(struct event_data) * 2);
 		if (ptr == NULL) { 
 			err_msg("malloc(event_data) error", ERR_CHK);
 			continue;
@@ -141,6 +139,7 @@ int main(int argc, char *argv[])
 	}
 
 	close(proxy_sock);
+	release_atomic_alloc();
 
 	return 0;
 }
@@ -198,26 +197,4 @@ void sig_usr1(int signo)
 {
 	write(STDOUT_FILENO, "sigusr1", 7);
 	exit(EXIT_SUCCESS);
-}
-
-Sigfunc *sigset(int signo, Sigfunc *func)
-{
-	struct sigaction act, oact;
-
-	act.sa_handler = func;
-	sigemptyset(&act.sa_mask);
-	act.sa_flags = 0;
-
-	if (signo == SIGALRM) {
-#ifdef SA_INTERRUPT
-		act.sa_flags |= SA_INTERRUPT;
-#endif
-	} else {
-		act.sa_flags |= SA_RESTART;
-	}
-
-	if (sigaction(signo, &act, &oact) < 0)
-		return SIG_ERR;
-
-	return (oact.sa_handler);
 }
