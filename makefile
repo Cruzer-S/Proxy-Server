@@ -20,8 +20,9 @@ TARGET_SERVER = web_server
 OBJECTS_SERVER = 		\
 	server.o			\
 	handler/error.o		\
+	handler/socket.o	\
 # =================================================
-all : $(TARGET_PROXY) $(TARGET_CLIENT)
+all : $(TARGET_PROXY) $(TARGET_CLIENT) $(TARGET_SERVER)
 
 $(TARGET_PROXY) : $(OBJECTS_PROYX)
 	$(CC) $(CFLAGS) -o $@ $^
