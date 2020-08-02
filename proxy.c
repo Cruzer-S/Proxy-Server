@@ -16,8 +16,8 @@
 
 #include "handler/error.h"
 #include "handler/socket.h"
-#include "handler/signal.h"
 #include "handler/atomic.h"
+#include "handler/signal.h"
 
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
