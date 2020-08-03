@@ -35,5 +35,6 @@ $(TARGET_SERVER) : $(OBJECTS_SERVER)
 
 clean:
 	rm	$(TARGET_PROXY) 	$(TARGET_CLIENT)	\
+		$(TARGET_SERVER)						\
 		*.o		handler/*.o
 # =================================================

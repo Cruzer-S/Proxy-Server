@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <pthread.h>
 
 #include "handler/error.h"
 #include "handler/socket.h"
@@ -16,7 +17,7 @@ int main(int argc, char *argv[])
     if (argc != 2)
         err_msg("usage: %s <port>", ERR_DNG, argv[0]);
 
-    serv_sock = listen_sock(atoi(argv[1]), BLOG);
+    serv_sock = listen_socket(atoi(argv[1]), BLOG);
     if (serv_sock < 0)
         err_msg("listen_sock() error: %d", ERR_CTC, serv_sock);
     
@@ -24,8 +25,8 @@ int main(int argc, char *argv[])
     {
         clnt_sock = accept(
 			serv_sock, 
-			(struct sockaddr*){ /* empty */ }, 
-			(int []) { sizeof(clnt_adr) }
+			(struct sockaddr*){ 0 }, 
+			(int []) { sizeof(struct sockaddr_in) }
 		);
 
         if (clnt_sock == -1) {
@@ -33,7 +34,7 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        if (pthread_reate((int *){ /* empty */ }, NULL, worker_thread, (void *)clnt_sock) != 0) {
+        if (pthread_create((pthread_t [1]){ 0, }, NULL, worker_thread, (void *)&clnt_sock) != 0) {
             err_msg("pthread_create() error!", ERR_CHK);
             continue;
         }
@@ -47,7 +48,7 @@ int main(int argc, char *argv[])
 void *worker_thread(void *args)
 {
     char buf[BUF_SIZE];
-    int sock = (int)args;
+    int sock = *(int*)args;
     int recv_len, send_len;
 
     for (;;)
