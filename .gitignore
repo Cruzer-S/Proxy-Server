@@ -56,4 +56,9 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
+# execute file
+client
+proxy_server
+web_server
+
 # End of https://www.toptal.com/developers/gitignore/api/c
