@@ -52,27 +52,31 @@ void *worker_thread(void *args)
 {
     char buf[BUF_SIZE];
     int sock = *(int*)args;
-    int recv_len, send_len;
+    int wr_len, rd_len, count;
 
     for (;;)
     {
-        recv_len = recv(sock, buf, BUF_SIZE - 1, 0);
-        if (recv_len == -1) {
-            err_msg("recv() error!", ERR_CHK);
+        rd_len = read(sock, buf, BUF_SIZE);
+        if (rd_len == -1) {
+            err_msg("read() error!", ERR_CHK);
             continue;
         }
 
-		// printf("recv from client: %d \n", recv_len);
-
-        if (recv_len == 0) {
-			// printf("close client %d", sock);
+        if (rd_len == 0) {
             close(sock);
             break;
         }
 
-        send_len = 0;
-        while (send_len <= recv_len)
-            send_len += send(sock, buf, recv_len, 0);
+		wr_len = 0;
+        while (wr_len < rd_len) {
+            count = write(sock, &buf[wr_len], rd_len - wr_len);
+
+			if (count == -1) {
+				err_msg("write() error", ERR_CHK);
+				break;
+			}
+			wr_len += count;
+		}
     }
 
     close(sock);

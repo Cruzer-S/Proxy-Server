@@ -45,8 +45,8 @@ int main(int argc, char *argv[])
 	if (argc != 4) {
 		err_msg("usage: %s <proxy_port> <server_ip> <server_port>", ERR_DNG, argv[0]);
 	} else {
-		printf("proxy port: %s \n", argv[1]);
-		printf("server address: %s:%s \n", argv[2], argv[3]);
+		// printf("proxy port: %s \n", argv[1]);
+		// printf("server address: %s:%s \n", argv[2], argv[3]);
 
 		if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
 			err_msg("sigset() error", ERR_CTC);
@@ -109,8 +109,7 @@ int main(int argc, char *argv[])
 		ev_data[0]->pipe_fd[1] = clnt_sock;
 		if (register_epoll_handler(
 				&ep_stoc, serv_sock, 
-				EPOLLIN | EPOLLET, 
-				ev_data[0]) != 0) {
+				EPOLLIN, ev_data[0]) != 0) {
 
 			goto FAILED_TO_REGISTER;
 		}
@@ -119,8 +118,7 @@ int main(int argc, char *argv[])
 		ev_data[1]->pipe_fd[1] = serv_sock;
 		if (register_epoll_handler(
 				&ep_ctos, clnt_sock, 
-				EPOLLIN | EPOLLET,
-				ev_data[1]) != 0) {
+				EPOLLIN, ev_data[1]) != 0) {
 			
 			release_epoll_handler(&ep_stoc, serv_sock);
 
@@ -189,7 +187,7 @@ void *worker_thread(void *args)
 
 				atomic_free(ev_data);
 			} else {
-				write(ev_data->pipe_fd[1], buf, BUF_SIZE);
+				write(ev_data->pipe_fd[1], buf, str_len);
 			}
 		}
 	}

@@ -32,20 +32,21 @@ int main(int argc, char *argv[])
 			break;
 		
 		wr_len = write(sock, buf, strlen(buf));
-		printf("write len: %d \n", wr_len);
 
 		rd_len = 0;
-		while (rd_len <= wr_len) {
+		while (rd_len < wr_len) {
 			count = read(sock, &buf[rd_len], BUF_SIZE - 1);
-			if (count == -1)
+			if (count == -1) {
 				err_msg("read() error", ERR_CTC);
+				goto BREAK;
+			}
 
 			rd_len += count;
 		}
+		buf[rd_len] = '\0';
 
-		buf[rd_len] = 0;
 		printf("Message: %s", buf);
-	}
+	} BREAK:
 
 	close(sock);
 
