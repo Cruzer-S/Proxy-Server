@@ -29,11 +29,14 @@ int main(int argc, char *argv[])
 			(int []) { sizeof(struct sockaddr_in) }
 		);
 
+		// printf("client access \n");
+
         if (clnt_sock == -1) {
             err_msg("accept() error!", ERR_CHK);
             continue;
         }
 
+		// printf("create thread \n");
         if (pthread_create((pthread_t [1]){ 0, }, NULL, worker_thread, (void *)&clnt_sock) != 0) {
             err_msg("pthread_create() error!", ERR_CHK);
             continue;
@@ -59,13 +62,16 @@ void *worker_thread(void *args)
             continue;
         }
 
+		// printf("recv from client: %d \n", recv_len);
+
         if (recv_len == 0) {
+			// printf("close client %d", sock);
             close(sock);
             break;
         }
 
         send_len = 0;
-        while (send_len < recv_len)
+        while (send_len <= recv_len)
             send_len += send(sock, buf, recv_len, 0);
     }
 

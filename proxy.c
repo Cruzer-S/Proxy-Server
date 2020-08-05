@@ -34,16 +34,13 @@ struct event_data {
 int main(int argc, char *argv[])
 {
 	int proxy_sock, serv_sock, clnt_sock;
-	struct sockaddr_in clnt_adr;
 
-	struct event_data *ev_data;
+	struct event_data *ev_data[2];
 
 	struct epoll_handler ep_stoc, ep_ctos;	
 	//server to client, client to server
 
 	int ret;
-
-	void *ptr;
 
 	if (argc != 4) {
 		err_msg("usage: %s <proxy_port> <server_ip> <server_port>", ERR_DNG, argv[0]);
@@ -78,8 +75,8 @@ int main(int argc, char *argv[])
 	{
 		clnt_sock = accept(
 			proxy_sock, 
-			(struct sockaddr*)&clnt_adr, 
-			(int []) { sizeof(clnt_adr) }
+			(struct sockaddr*){ 0 }, 
+			(int []) { sizeof(struct sockaddr_in) }
 		);
 
 		if (clnt_sock == -1) {
@@ -101,36 +98,40 @@ int main(int argc, char *argv[])
 			continue;
 		}
 		
-		ev_data = atomic_alloc(sizeof(struct event_data) * 2);
-		if (ptr == NULL) { 
+		ev_data[0] = atomic_alloc(sizeof(struct event_data));
+		ev_data[1] = atomic_alloc(sizeof(struct event_data));
+		if (ev_data[0] == NULL || ev_data[1] == NULL) { 
 			err_msg("malloc(event_data) error", ERR_CHK);
 			continue;
 		}
 
-		ev_data[0].pipe_fd[0] = serv_sock;
-		ev_data[0].pipe_fd[1] = clnt_sock;
+		ev_data[0]->pipe_fd[0] = serv_sock;
+		ev_data[0]->pipe_fd[1] = clnt_sock;
 		if (register_epoll_handler(
 				&ep_stoc, serv_sock, 
 				EPOLLIN | EPOLLET, 
-				ptr + 0) != 0) {
+				ev_data[0]) != 0) {
 
 			goto FAILED_TO_REGISTER;
 		}
 
-		ev_data[1].pipe_fd[0] = proxy_sock;
-		ev_data[1].pipe_fd[1] = serv_sock;
+		ev_data[1]->pipe_fd[0] = clnt_sock;
+		ev_data[1]->pipe_fd[1] = serv_sock;
 		if (register_epoll_handler(
-				&ep_ctos, proxy_sock, 
+				&ep_ctos, clnt_sock, 
 				EPOLLIN | EPOLLET,
-				ptr + sizeof(struct event_data)) != 0) {
+				ev_data[1]) != 0) {
 			
 			release_epoll_handler(&ep_stoc, serv_sock);
 
 			goto FAILED_TO_REGISTER;
 		}
 
-		show_address("client address: ", &clnt_adr, " \n");
-		printf("connect client successfully \n");
+		// show_address("client address: ", &clnt_adr, " \n");
+		// printf("connect client successfully \n");
+		// printf("proxy: %d \nclient: %d \n server: %d \n"
+		// 	,proxy_sock, clnt_sock, serv_sock
+		// );
 
 		continue; 
 		
@@ -138,7 +139,10 @@ int main(int argc, char *argv[])
 		close(clnt_sock);
 		close(serv_sock);
 
-		free(ev_data);
+		atomic_free(ev_data[0]);
+		atomic_free(ev_data[1]);
+
+		err_msg("register_epoll_handler() error", ERR_CHK);
 	}
 
 	close(proxy_sock);
@@ -165,7 +169,7 @@ void *worker_thread(void *args)
 
 		for (int i = 0; i < cnt; i++)
 		{
-			ev_data = (struct event_data *)get_epoll_handler(handler);
+			ev_data = get_epoll_handler(handler);
 
 			if (ev_data == NULL) {
 				err_msg("get_epoll_handler() error", ERR_CHK);
@@ -180,13 +184,10 @@ void *worker_thread(void *args)
 
 			if (str_len == 0) {
 				release_epoll_handler(handler, ev_data->pipe_fd[0]);
-				
+
 				close(ev_data->pipe_fd[0]);
-				close(ev_data->pipe_fd[1]);
 
-				free(ev_data);
-
-				printf("closed client: %d \n", ev_data->pipe_fd[0]);
+				atomic_free(ev_data);
 			} else {
 				write(ev_data->pipe_fd[1], buf, BUF_SIZE);
 			}

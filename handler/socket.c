@@ -135,10 +135,12 @@ void *get_epoll_handler(struct epoll_handler *ep_handler)
 	int cur = ep_handler->cur_event;
 	int get = ep_handler->get_event;
 
-	if (cur <= 0 || get <= 0 || cur >= get)
+	if (get <= 0 || cur >= get)
 		return NULL;
 
-	return (void *)&ep_handler->ep_events[ep_handler->cur_event++];
+	ep_handler->cur_event++;
+
+	return ep_handler->ep_events[cur].data.ptr;
 }
 
 int release_epoll_handler(struct epoll_handler *ep_handler, int sock)
