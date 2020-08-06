@@ -34,20 +34,17 @@ struct event_data {
 int main(int argc, char *argv[])
 {
 	int proxy_sock, serv_sock, clnt_sock;
+	struct sockaddr_in serv_adr, clnt_adr;
 
 	struct event_data *ev_data[2];
 
-	struct epoll_handler ep_stoc, ep_ctos;	
-	//server to client, client to server
+	struct epoll_handler ep_stoc, ep_ctos;
 
 	int ret;
 
-	if (argc != 4) {
-		err_msg("usage: %s <proxy_port> <server_ip> <server_port>", ERR_DNG, argv[0]);
+	if (argc != 2) {
+		err_msg("usage: %s <proxy_port>", ERR_DNG, argv[0]);
 	} else {
-		// printf("proxy port: %s \n", argv[1]);
-		// printf("server address: %s:%s \n", argv[2], argv[3]);
-
 		if (sigset(SIGUSR1, sig_usr1) == SIG_ERR)
 			err_msg("sigset() error", ERR_CTC);
 
@@ -91,13 +88,16 @@ int main(int argc, char *argv[])
 			}
 		}
 
+		serv_adr = ParseHeader();
+		/*
 		if( (serv_sock = connect_socket(argv[2], atoi(argv[3]))) < 0) {
 			err_msg("connect_socket() error: %d", ERR_CHK, serv_sock);
 			close(clnt_sock);
 
 			continue;
 		}
-		
+		*/
+
 		ev_data[0] = atomic_alloc(sizeof(struct event_data));
 		ev_data[1] = atomic_alloc(sizeof(struct event_data));
 		if (ev_data[0] == NULL || ev_data[1] == NULL) { 

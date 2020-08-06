@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 			(int []) { sizeof(struct sockaddr_in) }
 		);
 
-		// printf("client access \n");
+		printf("client accept: %d \n", clnt_sock);
 
         if (clnt_sock == -1) {
             err_msg("accept() error!", ERR_CHK);
@@ -66,6 +66,9 @@ void *worker_thread(void *args)
             close(sock);
             break;
         }
+
+		buf[rd_len] = 0;
+		printf("%s", buf);
 
 		wr_len = 0;
         while (wr_len < rd_len) {
