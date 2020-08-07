@@ -21,15 +21,21 @@
 
 #define BLOG		(10)		//back-log
 #define EPOLL_SIZE	(50)
-#define BUF_SIZE	(1024)
+#define BUFFER_SIZE	(4096)
+#define HEADER_SIZE	(4096)		// 4kb
+
+struct event_data {
+	int pipe_fd[2];
+	int read_len;
+	char *header;
+	bool is_client;
+};
+
+int receive_header(struct event_data );
 
 void *worker_thread(void *);
 
 void sig_usr1(int );
-
-struct event_data {
-	int pipe_fd[2];
-};
 
 int main(int argc, char *argv[])
 {
@@ -88,62 +94,32 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		serv_adr = ParseHeader();
-		/*
-		if( (serv_sock = connect_socket(argv[2], atoi(argv[3]))) < 0) {
-			err_msg("connect_socket() error: %d", ERR_CHK, serv_sock);
-			close(clnt_sock);
-
+		ev_data = atomic_alloc(sizeof(struct event_data));
+		if (ev_data == NULL) { 
+			err_msg("atomic_alloc(ev_data) error", ERR_CHK);
 			continue;
-		}
-		*/
+		} else {
+			ev_data->pipe_fd[0] = clnt_sock;
+			ev_data->read_len = 0;
+			ev_data->is_client = true;
 
-		ev_data[0] = atomic_alloc(sizeof(struct event_data));
-		ev_data[1] = atomic_alloc(sizeof(struct event_data));
-		if (ev_data[0] == NULL || ev_data[1] == NULL) { 
-			err_msg("malloc(event_data) error", ERR_CHK);
-			continue;
-		}
-
-		ev_data[0]->pipe_fd[0] = serv_sock;
-		ev_data[0]->pipe_fd[1] = clnt_sock;
-		if (register_epoll_handler(
-				&ep_stoc, serv_sock, 
-				EPOLLIN, ev_data[0]) != 0) {
-
-			goto FAILED_TO_REGISTER;
+			ev_data->header = atomic_alloc(HEADER_SIZE);
+			if (ev_data->header == NULL) {
+				err_msg("atomic_alloc(header) error", ERR_CHK);
+				continue;
+			}
 		}
 
-		ev_data[1]->pipe_fd[0] = clnt_sock;
-		ev_data[1]->pipe_fd[1] = serv_sock;
 		if (register_epoll_handler(
 				&ep_ctos, clnt_sock, 
-				EPOLLIN, ev_data[1]) != 0) {
-			
-			release_epoll_handler(&ep_stoc, serv_sock);
+				EPOLLIN, ev_data) != 0) {
+			close(clnt_sock);
+			atomic_free(ev_data);
 
-			goto FAILED_TO_REGISTER;
+			err_msg("register_epoll_handler() error", ERR_CHK)
 		}
-
-		// show_address("client address: ", &clnt_adr, " \n");
-		// printf("connect client successfully \n");
-		// printf("proxy: %d \nclient: %d \n server: %d \n"
-		// 	,proxy_sock, clnt_sock, serv_sock
-		// );
-
-		continue; 
-		
-		FAILED_TO_REGISTER:
-		close(clnt_sock);
-		close(serv_sock);
-
-		atomic_free(ev_data[0]);
-		atomic_free(ev_data[1]);
-
-		err_msg("register_epoll_handler() error", ERR_CHK);
 	}
 
-	close(proxy_sock);
 	release_atomic_alloc();
 
 	return 0;
@@ -155,7 +131,7 @@ void *worker_thread(void *args)
 	struct event_data *ev_data;
 	int str_len, cnt;
 
-	int buf[BUF_SIZE];
+	int buf[BUFFER_SIZE];
 	
 	for(;;)
 	{
@@ -174,20 +150,44 @@ void *worker_thread(void *args)
 				continue;
 			}
 
-			str_len = read(ev_data->pipe_fd[0], buf, BUF_SIZE);
-			if (str_len == -1) {
-				err_msg("read() error", ERR_CHK);
-				continue;
-			}
+			if (ev_data->is_client) {
 
-			if (str_len == 0) {
-				release_epoll_handler(handler, ev_data->pipe_fd[0]);
+				/*
+				int rd_len = ev_data->read_len;
 
-				close(ev_data->pipe_fd[0]);
+				// read header
+				str_len = read(
+					ev_data->pipe_fd[0],
+					&ev_data->header[rd_len],
+					HEADER_SIZE - rd_len
+				);
 
-				atomic_free(ev_data);
-			} else {
-				write(ev_data->pipe_fd[1], buf, str_len);
+				if (str_len == -1) {
+					err_msg("read() error", ERR_CHK);
+				}
+
+				if (str_len == 0) {
+					release_epoll_handler(handler, ev_data->pipe_fd[0]);
+					close(ev_data->pipe_fd[0]);
+					atomic_free(ev_data->header);
+				} else {
+				}
+				*/
+			} else {	// server
+				str_len = read(ev_data->pipe_fd[0], buf, BUFFER_SIZE);
+				if (str_len == -1) {
+					err_msg("read() error", ERR_CHK);
+					continue;
+				}
+
+				if (str_len == 0) {
+					release_epoll_handler(handler, ev_data->pipe_fd[0]);
+
+					close(ev_data->pipe_fd[0]);
+					atomic_free(ev_data);
+				} else {
+					write(ev_data->pipe_fd[1], buf, str_len);
+				}
 			}
 		}
 	}
