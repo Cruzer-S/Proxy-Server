@@ -9,16 +9,21 @@
 #include <unistd.h>		//close
 #include <fcntl.h>		//fcntl
 #include <stdlib.h>		//malloc, free
+#include <netdb.h>
+#include <stdint.h>
 
-void show_address(const char *, struct sockaddr_in *, const char *);
+void show_address(struct sockaddr_in *);
 
 int listen_socket(short , int );
 
 int connect_socket(const char *, short );
+int connect_socket2(struct sockaddr_in *);
 
 int nonblocking(int );
 
 struct sockaddr_in convert_hostname(const char *);
+
+int translate_host(char *, struct sockaddr_in *);
 
 struct epoll_handler {
 	struct epoll_event *ep_events;

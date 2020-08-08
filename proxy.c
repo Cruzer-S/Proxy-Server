@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <sys/epoll.h>
+#include <netdb.h>
 
 #include "handler/error.h"
 #include "handler/socket.h"
@@ -23,14 +24,13 @@
 #define EPOLL_SIZE	(50)
 #define BUFFER_SIZE	(4096)
 #define HEADER_SIZE	(4096)		// 4kb
+#define MAX_LINE	(1024)
 
 struct event_data {
 	int pipe_fd[2];
-	char *header;
-	bool is_client;
 };
 
-inline int receive_header(struct event_data *, struct epoll_handler *);
+inline int receive_header(int , char *, int);
 inline int parse_header(const char *, int , void *);
 
 void *worker_thread(void *);
@@ -47,6 +47,8 @@ int main(int argc, char *argv[])
 	struct epoll_handler ep_stoc, ep_ctos;
 
 	int ret;
+
+	char header[HEADER_SIZE];
 
 	if (argc != 2) {
 		err_msg("usage: %s <proxy_port>", ERR_DNG, argv[0]);
@@ -94,34 +96,46 @@ int main(int argc, char *argv[])
 
 				continue;
 			}
-
-			printf("client access");
-			show_address(": ", &clnt_adr, "\n");
 		}
 
 		ev_data = atomic_alloc(sizeof(struct event_data));
 		if (ev_data == NULL) { 
-			err_msg("atomic_alloc(ev_data) error", ERR_CHK);
+			err_msg("atomic_alloc(ev_data) error", ERR_NRM);
 			continue;
-		} else {
-			ev_data->pipe_fd[0] = clnt_sock;
-			ev_data->pipe_fd[1] = 0;
-			ev_data->is_client = true;
-
-			ev_data->header = atomic_alloc(HEADER_SIZE);
-			if (ev_data->header == NULL) {
-				err_msg("atomic_alloc(header) error", ERR_CHK);
-				continue;
-			}
-		}
-
+		} 
+		
+		ev_data->pipe_fd[0] = clnt_sock;
 		if (register_epoll_handler(
 				&ep_ctos, clnt_sock, 
 				EPOLLIN | EPOLLET, ev_data) != 0) {
 			close(clnt_sock);
 			atomic_free(ev_data);
 
-			err_msg("register_epoll_handler() error", ERR_CHK);
+			err_msg("register_epoll_handler() error", ERR_NRM);
+
+			continue;
+		}
+
+		if ( receive_header(clnt_sock, header, HEADER_SIZE) < 0) {
+			close(clnt_sock);
+			atomic_free(ev_data);
+
+			err_msg("receive_header() error", ERR_CHK);
+			continue;
+		}
+
+		if (parse_header(header, 0, &serv_adr) < 0) {
+			close(clnt_sock);
+			atomic_free(ev_data);
+
+			err_msg("parse_header() error", ERR_CHK);
+			continue;
+		}
+
+		serv_sock = connect_socket(inet_ntoa(serv_adr.sin_addr), serv_adr.sin_port);
+		if (serv_sock < 0) {
+			err_msg("connect_socket2() error", ERR_CHK);
+			continue;
 		}
 	}
 
@@ -154,34 +168,6 @@ void *worker_thread(void *args)
 				err_msg("get_epoll_handler() error", ERR_CHK);
 				continue;
 			}
-
-			if (ev_data->is_client) {
-				int err;
-
-				switch ( (err = receive_header(ev_data, handler)) )
-				{
-				case -1: case -2:
-					err_msg("receive_header error: %d", ERR_CHK, err);
-
-					release_epoll_handler(handler, ev_data->pipe_fd[0]);
-					close(ev_data->pipe_fd[0]);
-					atomic_free(ev_data->header);
-					atomic_free(ev_data);
-					break;
-
-				case 0:	continue;
-				case 1: ;
-					struct sockaddr_in serv_adr;
-					if (parse_header(ev_data->header, 0, &serv_adr) == -1) {
-						err_msg("parse_header() error", ERR_CHK);
-						continue;
-					}
-
-					ev_data->is_client = false;
-					atomic_free(ev_data->header);
-					break;
-				}
-			}
 		}
 	}
 
@@ -194,45 +180,67 @@ void sig_usr1(int signo)
 	exit(EXIT_SUCCESS);
 }
 
-int receive_header(struct event_data *ev_data, struct epoll_handler *handler)
+int receive_header(int sock, char *header, int header_size)
 {
-	int sock = ev_data->pipe_fd[0];
-	int rd_len = ev_data->pipe_fd[1];
-	char *header = ev_data->header;
-	int str_len;
+	int rd_len, str_len;
 
-	str_len = read(sock, &header[rd_len], HEADER_SIZE - rd_len);
-	if (str_len == -1)
-		return -1;
-	else if (str_len == 0)
-		return -2;
-
-	rd_len += str_len;
-	if (rd_len > 4) {
-		char *ptr = strstr(&header[rd_len - 5], "\r\n\r\n");
-		if (ptr != NULL) {
-			// printf("Header: %s", header);
-			return 1;
+	rd_len = 0;
+	for (;;) {
+		str_len = read(sock, &header[rd_len], header_size - rd_len);
+		if (str_len == -1) {
+			if (errno == EAGAIN)
+				continue;
 		}
-	}
 
-	ev_data->pipe_fd[1] = rd_len;
+		else if (str_len == 0)
+			return -2;
+
+		rd_len += str_len;
+
+		if (rd_len == header_size)
+			break;
+
+		if (rd_len > 4)
+			if ( strstr(&header[rd_len - 5], "\r\n\r\n") != NULL)
+				break;
+	}
 
 	return 0;
 }
 
 int parse_header(const char *header, int type, void *ret)
 {
+	char line[MAX_LINE];
 	switch(type)
 	{
 	case 0:	; //sockaddr_in
 		struct sockaddr_in sock_adr;
+		struct hostent *hostent;
 
+		const char *target, *endl;
+		char *host, *end;
 
+		target = "Host: ", endl = "\r\n";
 
-		*(struct sockaddr_in*)ret = sock_adr;
-		return 0;
+		host = strstr(header, target);
+		if (host == NULL)	return -1;
+		else				host += strlen(target);
+
+		end = strstr(host, endl);
+		if (end == NULL)	return -2;
+		else				strncpy(line, host, end - host);
+
+		int i = 0;
+		memset(&sock_adr, 0, sizeof(struct sockaddr_in));
+		if ((i = translate_host(line, &sock_adr)) < 0)
+			return -3;
+
+		*(struct sockaddr_in *)ret = sock_adr;
+		break;
+
+	case 1:	// connection-type
+		break;
 	}
 
-	return -1;
+	return 1;
 }
