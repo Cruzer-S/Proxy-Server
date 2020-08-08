@@ -26,12 +26,12 @@
 
 struct event_data {
 	int pipe_fd[2];
-	int read_len;
 	char *header;
 	bool is_client;
 };
 
 inline int receive_header(struct event_data *, struct epoll_handler *);
+inline int parse_header(const char *, int , void *);
 
 void *worker_thread(void *);
 
@@ -74,11 +74,13 @@ int main(int argc, char *argv[])
 	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&ep_ctos) != 0)
 		err_msg("pthread_create() error", ERR_CTC);
 
+	atomic_print("server setup \n");
+
 	for (;;)
 	{
 		clnt_sock = accept(
 			proxy_sock, 
-			(struct sockaddr*){ 0 }, 
+			(struct sockaddr*)&clnt_adr, 
 			(int []) { sizeof(struct sockaddr_in) }
 		);
 
@@ -92,6 +94,9 @@ int main(int argc, char *argv[])
 
 				continue;
 			}
+
+			printf("client access");
+			show_address(": ", &clnt_adr, "\n");
 		}
 
 		ev_data = atomic_alloc(sizeof(struct event_data));
@@ -100,7 +105,7 @@ int main(int argc, char *argv[])
 			continue;
 		} else {
 			ev_data->pipe_fd[0] = clnt_sock;
-			ev_data->read_len = 0;
+			ev_data->pipe_fd[1] = 0;
 			ev_data->is_client = true;
 
 			ev_data->header = atomic_alloc(HEADER_SIZE);
@@ -151,42 +156,30 @@ void *worker_thread(void *args)
 			}
 
 			if (ev_data->is_client) {
-				receive_header(ev_data, handler);
-				/*
-				int rd_len = ev_data->read_len;
+				int err;
 
-				// read header
-				str_len = read(
-					ev_data->pipe_fd[0],
-					&ev_data->header[rd_len],
-					HEADER_SIZE - rd_len
-				);
+				switch ( (err = receive_header(ev_data, handler)) )
+				{
+				case -1: case -2:
+					err_msg("receive_header error: %d", ERR_CHK, err);
 
-				if (str_len == -1) {
-					err_msg("read() error", ERR_CHK);
-				}
-
-				if (str_len == 0) {
 					release_epoll_handler(handler, ev_data->pipe_fd[0]);
 					close(ev_data->pipe_fd[0]);
 					atomic_free(ev_data->header);
-				} else {
-				}
-				*/
-			} else {	// server
-				str_len = read(ev_data->pipe_fd[0], buf, BUFFER_SIZE);
-				if (str_len == -1) {
-					err_msg("read() error", ERR_CHK);
-					continue;
-				}
-
-				if (str_len == 0) {
-					release_epoll_handler(handler, ev_data->pipe_fd[0]);
-
-					close(ev_data->pipe_fd[0]);
 					atomic_free(ev_data);
-				} else {
-					write(ev_data->pipe_fd[1], buf, str_len);
+					break;
+
+				case 0:	continue;
+				case 1: ;
+					struct sockaddr_in serv_adr;
+					if (parse_header(ev_data->header, 0, &serv_adr) == -1) {
+						err_msg("parse_header() error", ERR_CHK);
+						continue;
+					}
+
+					ev_data->is_client = false;
+					atomic_free(ev_data->header);
+					break;
 				}
 			}
 		}
@@ -204,7 +197,7 @@ void sig_usr1(int signo)
 int receive_header(struct event_data *ev_data, struct epoll_handler *handler)
 {
 	int sock = ev_data->pipe_fd[0];
-	int rd_len = ev_data->read_len;
+	int rd_len = ev_data->pipe_fd[1];
 	char *header = ev_data->header;
 	int str_len;
 
@@ -216,12 +209,30 @@ int receive_header(struct event_data *ev_data, struct epoll_handler *handler)
 
 	rd_len += str_len;
 	if (rd_len > 4) {
-		char *ptr = strstr(&header[rd_len - 4], "\r\n\r\n");
+		char *ptr = strstr(&header[rd_len - 5], "\r\n\r\n");
 		if (ptr != NULL) {
-			atomic_print("%s", header);
+			// printf("Header: %s", header);
 			return 1;
 		}
 	}
 
+	ev_data->pipe_fd[1] = rd_len;
+
 	return 0;
+}
+
+int parse_header(const char *header, int type, void *ret)
+{
+	switch(type)
+	{
+	case 0:	; //sockaddr_in
+		struct sockaddr_in sock_adr;
+
+
+
+		*(struct sockaddr_in*)ret = sock_adr;
+		return 0;
+	}
+
+	return -1;
 }

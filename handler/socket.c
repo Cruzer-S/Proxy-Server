@@ -2,7 +2,7 @@
 
 void show_address(const char *start_string, struct sockaddr_in *addr, const char *end_string)
 {
-	printf("%s%s:%hd%s", 
+	printf("%s%s:%hu%s", 
 		//start string
 		start_string,
 		//ip address

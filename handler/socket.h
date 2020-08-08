@@ -18,6 +18,8 @@ int connect_socket(const char *, short );
 
 int nonblocking(int );
 
+struct sockaddr_in convert_hostname(const char *);
+
 struct epoll_handler {
 	struct epoll_event *ep_events;
 	int epoll_fd;
