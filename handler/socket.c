@@ -72,7 +72,7 @@ int connect_socket2(struct sockaddr_in *sock_adr)
 	if (sock == -1)
 		return -1;
 
-	if (connect(sock, (struct sockaddr*)&sock_adr, sizeof(struct sockaddr_in)) == -1) {
+	if (connect(sock, (struct sockaddr*)sock_adr, sizeof(struct sockaddr_in)) == -1) {
 		close(sock);
 		return -2;
 	}
@@ -185,7 +185,7 @@ int register_epoll_handler(struct epoll_handler *ep_handler, int sock, int opt, 
 }
 
 int wait_epoll_handler(struct epoll_handler *ep_handler)
-{
+{	//non-thread-safety
 	ep_handler->cur_event = 0;
 
 	return (ep_handler->get_event = epoll_wait(
@@ -196,7 +196,7 @@ int wait_epoll_handler(struct epoll_handler *ep_handler)
 }
 
 void *get_epoll_handler(struct epoll_handler *ep_handler)
-{
+{	//non-thread-safety
 	int cur = ep_handler->cur_event;
 	int get = ep_handler->get_event;
 

@@ -28,12 +28,20 @@
 
 struct event_data {
 	int pipe_fd[2];
+
+	char *data;
+	int data_size;
+};
+
+struct thread_args {
+	struct epoll_handler *handler[2];
 };
 
 inline int receive_header(int , char *, int);
 inline int parse_header(const char *, int , void *);
 
-void *worker_thread(void *);
+void *client_thread(void *);
+// void *server_thread(void *);
 
 void sig_usr1(int );
 
@@ -45,10 +53,9 @@ int main(int argc, char *argv[])
 	struct event_data *ev_data;
 
 	struct epoll_handler ep_stoc, ep_ctos;
+	struct thread_args thd_arg;
 
 	int ret;
-
-	char header[HEADER_SIZE];
 
 	if (argc != 2) {
 		err_msg("usage: %s <proxy_port>", ERR_DNG, argv[0]);
@@ -64,16 +71,12 @@ int main(int argc, char *argv[])
 	if (proxy_sock < 0)
 		err_msg("listen_sock() error: %d", ERR_CTC, proxy_sock);
 
-	if ( (ret = create_epoll_handler(&ep_stoc, EPOLL_SIZE)) != 0)
-		err_msg("create_epoll_handler(stoc) error: %d", ERR_CTC, ret);
-	
 	if ( (ret = create_epoll_handler(&ep_ctos, EPOLL_SIZE)) != 0)
-		err_msg("create_epoll_handler(ctos) error: %d", ERR_CTC, ret);
+		err_msg("create_epoll_handler(stoc) error: %d", ERR_CTC, ret);	
 
-	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&ep_stoc) != 0)
-		err_msg("pthread_create() error", ERR_CTC);
-	
-	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&ep_ctos) != 0)
+	thd_arg.handler[0] = &ep_ctos;
+
+	if (pthread_create((pthread_t [1]) { 0 }, NULL, client_thread, (void *)&thd_arg) != 0)
 		err_msg("pthread_create() error", ERR_CTC);
 
 	atomic_print("server setup \n");
@@ -105,6 +108,10 @@ int main(int argc, char *argv[])
 		} 
 		
 		ev_data->pipe_fd[0] = clnt_sock;
+		ev_data->pipe_fd[1] = -1;
+		ev_data->data = atomic_alloc(HEADER_SIZE);
+		ev_data->data_size = HEADER_SIZE;
+
 		if (register_epoll_handler(
 				&ep_ctos, clnt_sock, 
 				EPOLLIN | EPOLLET, ev_data) != 0) {
@@ -115,28 +122,6 @@ int main(int argc, char *argv[])
 
 			continue;
 		}
-
-		if ( receive_header(clnt_sock, header, HEADER_SIZE) < 0) {
-			close(clnt_sock);
-			atomic_free(ev_data);
-
-			err_msg("receive_header() error", ERR_CHK);
-			continue;
-		}
-
-		if (parse_header(header, 0, &serv_adr) < 0) {
-			close(clnt_sock);
-			atomic_free(ev_data);
-
-			err_msg("parse_header() error", ERR_CHK);
-			continue;
-		}
-
-		serv_sock = connect_socket(inet_ntoa(serv_adr.sin_addr), serv_adr.sin_port);
-		if (serv_sock < 0) {
-			err_msg("connect_socket2() error", ERR_CHK);
-			continue;
-		}
 	}
 
 	release_atomic_alloc();
@@ -144,17 +129,19 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-void *worker_thread(void *args)
+void *client_thread(void *args)
 {
-	struct epoll_handler *handler = (struct epoll_handler *)args;
 	struct event_data *ev_data;
-	int str_len, cnt;
+	struct thread_args *thd_arg = (struct thread_args *)args;
 
-	int buf[BUFFER_SIZE];
+	struct epoll_handler	*ep_ctos = thd_arg->handler[0],
+							*ep_stoc = thd_arg->handler[1];
+
+	int cnt, ret;
 	
 	for(;;)
 	{
-		cnt = wait_epoll_handler(handler);
+		cnt = wait_epoll_handler(ep_ctos);
 		if (cnt == -1) {
 			err_msg("wait_epoll_handler() error: %d", ERR_CHK, cnt);
 			continue;
@@ -162,11 +149,41 @@ void *worker_thread(void *args)
 
 		for (int i = 0; i < cnt; i++)
 		{
-			ev_data = get_epoll_handler(handler);
+			ev_data = get_epoll_handler(ep_ctos);
 
 			if (ev_data == NULL) {
 				err_msg("get_epoll_handler() error", ERR_CHK);
 				continue;
+			}
+			
+			if (ev_data->pipe_fd[1] == -1) {
+				ret = receive_header(ev_data->pipe_fd[0], ev_data->data, ev_data->data_size);
+				if (ret < 0) {
+					err_msg("receive_header() error", ERR_CHK);
+					goto ERROR_HANDLER;
+				}
+
+				struct sockaddr_in serv_adr;
+				if (parse_header(ev_data->data, 0, &serv_adr) < 0) {
+					err_msg("parse_header() error", ERR_CHK);
+					goto ERROR_HANDLER;
+				}
+
+				ev_data->pipe_fd[1] = connect_socket2(&serv_adr);
+				if (ev_data->pipe_fd[1] < 0) {
+					err_msg("connect_socket2() error", ERR_CHK);
+					goto ERROR_HANDLER;
+				}
+
+				show_address(&serv_adr);
+
+				continue; ERROR_HANDLER:
+				release_epoll_handler(ep_ctos, ev_data->pipe_fd[0]);
+				close(ev_data->pipe_fd[0]);
+
+				atomic_free(ev_data->data);
+				atomic_free(ev_data);
+			} else {
 			}
 		}
 	}
@@ -189,11 +206,15 @@ int receive_header(int sock, char *header, int header_size)
 		str_len = read(sock, &header[rd_len], header_size - rd_len);
 		if (str_len == -1) {
 			if (errno == EAGAIN)
-				continue;
+				return -1;	//It means that
+							//1. there's no read data
+							//2. however, header isn't complete
+			else
+				return -2;
 		}
 
 		else if (str_len == 0)
-			return -2;
+			return -3;
 
 		rd_len += str_len;
 
