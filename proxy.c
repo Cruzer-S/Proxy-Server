@@ -28,6 +28,7 @@
 
 struct event_data {
 	int pipe_fd[2];
+	struct event_data *target;
 };
 
 struct thread_args {
@@ -39,10 +40,9 @@ struct thread_args {
 inline int receive_header(int , char *, int);
 inline int parse_header(const char *, int , void *);
 inline int connect_server(struct event_data *, char *, int );
-inline struct event_data *create_event_data(int , int );
+inline struct event_data *create_event_data(int , int , struct event_data *);
 
 void *worker_thread(void *);
-// void *server_thread(void *);
 
 void sig_usr1(int );
 
@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
 	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&clnt_arg) != 0)
 		err_msg("pthread_create() error", ERR_CTC);
 
-	atomic_print("server setup \n");
+	printf("start server \n");
 
 	for (;;)
 	{
@@ -116,19 +116,20 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		ev_data = create_event_data(clnt_sock, -1);
+		ev_data = create_event_data(clnt_sock, -1, NULL);
 		if (ev_data == NULL) { 
 			close(clnt_sock);
 			err_msg("create_event_data() error", ERR_NRM);
 			continue;
-		} 
+		}
 	
 		if (register_epoll_handler(
 				&ep_ctos, clnt_sock, 
 				EPOLLIN | EPOLLET, ev_data) != 0) {
 			close(clnt_sock);
 			atomic_free(ev_data);
-			// err_msg("register_epoll_handler() error", ERR_NRM);
+			
+			err_msg("register_epoll_handler() error", ERR_NRM);
 			continue;
 		}
 	}
@@ -177,8 +178,9 @@ void *worker_thread(void *args)
 				}
 
 				struct event_data *serv_data = 
-					create_event_data(ev_data->pipe_fd[1], ev_data->pipe_fd[0]);
+					create_event_data(ev_data->pipe_fd[1], ev_data->pipe_fd[0], ev_data);
 
+				serv_data->target = ev_data;
 				if (serv_data == NULL) {
 					err_msg("create_event_data() error", ERR_CHK);
 					goto CLEANUP;
@@ -195,19 +197,28 @@ void *worker_thread(void *args)
 					goto CLEANUP;
 				}
 
-				printf("make connection [%d -> %d] %d \n", 
-						ev_data->pipe_fd[0], ev_data->pipe_fd[1], thd_arg->type);
+				ev_data->target = serv_data;
+				printf("make connection [%d -> %d] %s \n", 
+					ev_data->pipe_fd[0], ev_data->pipe_fd[1], 
+					(thd_arg->type == 0) ? "server" : "client"
+				);
 
 				write(ev_data->pipe_fd[1], header, read_len);
-				// printf("send data: %s", header);
 			} else {
 				char buffer[buffer_size];
 
 				for (;;) {
 					int str_len = read(ev_data->pipe_fd[0], buffer, buffer_size);
 					if (str_len == 0) {
-						printf("close request [%d -> %d] %d \n", 
-								ev_data->pipe_fd[0], ev_data->pipe_fd[1], thd_arg->type);
+						printf("close request [%d -> %d] %s \n", 
+							ev_data->pipe_fd[0], ev_data->pipe_fd[1],
+							(thd_arg->type == 0) ? "server" : "client"
+						);
+
+						printf("close target [%d -> %d] \n", ev_data->pipe_fd[1], ev_data->pipe_fd[0]);
+						release_epoll_handler(target_handler, ev_data->pipe_fd[1]);
+						close(ev_data->pipe_fd[1]);
+						atomic_free(ev_data->target);
 
 						goto CLEANUP;
 					} else if (str_len < 0) {
@@ -216,7 +227,7 @@ void *worker_thread(void *args)
 						else
 							err_msg("read() error", ERR_CHK);
 					} else {
-						// printf("send data: %s", buffer);
+						printf("write [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);
 						write(ev_data->pipe_fd[1], buffer, str_len);
 					}
 				}
@@ -227,7 +238,6 @@ void *worker_thread(void *args)
 			CLEANUP: ; {
 				release_epoll_handler(handler, ev_data->pipe_fd[0]);
 				close(ev_data->pipe_fd[0]);
-
 				atomic_free(ev_data);
 			}
 		}
@@ -256,16 +266,16 @@ int receive_header(int sock, char *header, int header_size)
 							//2. however, header isn't complete
 			else
 				return -2;
-		}
-
-		else if (str_len == 0)
-			return -3;
+		} else if (str_len == 0) return -3;
 
 		rd_len += str_len;
 
-		if (rd_len == header_size)
+		if (rd_len == header_size) {
+			header[header_size - 1] = '\0';
 			break;
+		}
 
+		header[rd_len] = '\0';
 		if (rd_len > 4)
 			if ( strstr(&header[rd_len - 5], "\r\n\r\n") != NULL)
 				break;
@@ -295,23 +305,60 @@ int parse_header(const char *header, int type, void *ret)
 		end = strstr(host, endl);
 		if (end == NULL)	return -2;
 		else				strncpy(line, host, end - host);
-
-		int i = 0;
+		line[end - host] = 0;
+		
 		memset(&sock_adr, 0, sizeof(struct sockaddr_in));
-		if ((i = translate_host(line, &sock_adr)) < 0)
+		if (translate_host(line, &sock_adr) < 0)
 			return -3;
 
 		*(struct sockaddr_in *)ret = sock_adr;
 		break;
 
-	case 1:	// connection-type
+	case 1:	// Method
+
 		break;
 	}
 
 	return 1;
 }
 
-struct event_data *create_event_data(int sock1, int sock2)
+int connect_server(struct event_data *ev_data, char *header, int header_size)
+{
+	int ret;
+	int read_len;
+	struct sockaddr_in serv_adr;
+
+	if ( (read_len = receive_header(ev_data->pipe_fd[0], header, header_size)) < 0) {
+		// printf("failed to receive_header(): %d", read_len);
+		return -1;
+	} else {
+		// printf("============ receive_header ==========\n", header);
+		// printf("%s", header);
+	}
+
+	if ( (ret = parse_header(header, 0, &serv_adr)) < 0) {
+		// printf("failed to parse_header(): %d\n", ret);
+		return -2;
+	} else {
+		// printf("=========== parse_header =============\n");
+		// show_address(&serv_adr);
+		// printf("\n");
+	}
+
+	// printf("connect_socket2() \n");
+	ev_data->pipe_fd[1] = connect_socket2(&serv_adr, 0, 1);
+	if (ev_data->pipe_fd[1] < 0) {
+		// printf("failed to connect_socket2(): %d \n", ev_data->pipe_fd[1]);
+		return -3;
+	} else {
+		// printf("============ connect_socket2 =========\n");
+		// printf("server fd: %d \n", ev_data->pipe_fd[1]);
+	}
+
+	return read_len;
+}
+
+struct event_data *create_event_data(int sock1, int sock2, struct event_data *target)
 {
 	struct event_data *ev_data = atomic_alloc(sizeof(struct event_data));
 
@@ -320,24 +367,8 @@ struct event_data *create_event_data(int sock1, int sock2)
 
 	ev_data->pipe_fd[0] = sock1;
 	ev_data->pipe_fd[1] = sock2;
+	ev_data->target = target;
 
 	return ev_data;
 }
 
-int connect_server(struct event_data *ev_data, char *header, int header_size)
-{
-	int read_len;
-	struct sockaddr_in serv_adr;
-
-	if ( (read_len = receive_header(ev_data->pipe_fd[0], header, header_size)) < 0)
-		return -1;
-
-	if (parse_header(header, 0, &serv_adr) < 0)
-		return -2;
-
-	ev_data->pipe_fd[1] = connect_socket2(&serv_adr);
-	if (ev_data->pipe_fd[1] < 0)
-		return -3;
-
-	return read_len;
-}

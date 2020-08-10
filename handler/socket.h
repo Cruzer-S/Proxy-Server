@@ -11,15 +11,18 @@
 #include <stdlib.h>		//malloc, free
 #include <netdb.h>
 #include <stdint.h>
+#include <errno.h>
 
 void show_address(struct sockaddr_in *);
 
 int listen_socket(short , int );
 
 int connect_socket(const char *, short );
-int connect_socket2(struct sockaddr_in *);
+int connect_socket2(struct sockaddr_in *, int , int );
 
 int nonblocking(int );
+
+int check_connection(int );
 
 struct sockaddr_in convert_hostname(const char *);
 

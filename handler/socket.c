@@ -64,7 +64,7 @@ int connect_socket(const char *ip_addr, short port)
 	return sock;
 }
 
-int connect_socket2(struct sockaddr_in *sock_adr)
+int connect_socket2(struct sockaddr_in *sock_adr, int opt1, int opt2)
 {
 	int sock;
 
@@ -72,9 +72,27 @@ int connect_socket2(struct sockaddr_in *sock_adr)
 	if (sock == -1)
 		return -1;
 
-	if (connect(sock, (struct sockaddr*)sock_adr, sizeof(struct sockaddr_in)) == -1) {
-		close(sock);
-		return -2;
+	switch (opt1) 
+	{
+	case 0:
+		if (nonblocking(sock) != 0)
+			return -2;
+		break;
+	}
+
+	if (connect(sock, (struct sockaddr*)sock_adr, sizeof(struct sockaddr_in)) == -1) 
+	{
+		if (errno == EINPROGRESS) {
+			sleep(opt2);
+			if (check_connection(sock) != 0) 
+			{
+				close(sock);
+				return -5;
+			}
+		} else {
+			close(sock);
+			return -4;
+		}
 	}
 
 	return sock;
@@ -94,12 +112,32 @@ int nonblocking(int fd)
 	return 0;
 }
 
+int check_connection(int sock)
+{
+	int error = 0;
+
+	socklen_t len = sizeof(error);
+	if (getsockopt(sock, SOL_SOCKET, SO_ERROR, (void *)&error, &len) < 0) {
+		return -1;
+	}
+
+	if (error != 0) {
+		if (ECONNREFUSED == error) {
+			return -2;
+		} else if (ETIMEDOUT == error) {
+			return -3;
+		} else
+			return -4;
+	}
+
+	return 0;
+}
+
 int translate_host(char *host, struct sockaddr_in *sock_adr)
 {
+	struct addrinfo hints;
+	struct addrinfo *servinfo;
 	char *colon;
-	struct hostent *hostent;
-
-	sock_adr->sin_family = AF_INET;
 
 	colon = strchr(host, ':');
 	if (colon != NULL) {
@@ -107,39 +145,41 @@ int translate_host(char *host, struct sockaddr_in *sock_adr)
 		uint16_t port_num;
 
 		port = (colon + 1);
-		port_num = atoi(port);
+		port_num = strtol(port, NULL, 10);
 		if (port_num == 0) 
 			return -1;
 
-		sock_adr->sin_port = htons(port_num);
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
 
 		*colon = '\0';
-		if ( inet_aton(host, &(sock_adr->sin_addr)) ) {
+		if (getaddrinfo(host, port, &hints, &servinfo) != 0) {
 			*colon = ':';
-			return 0;
+			return -2;
 		} else {
-			hostent = gethostbyname(host);
 			*colon = ':';
-			if (hostent == NULL)
-				return -2;
 
-			memcpy(&sock_adr->sin_addr, hostent->h_addr_list[0], hostent->h_length);
-			return 1;
+			memcpy(sock_adr, servinfo->ai_addr, servinfo->ai_addrlen);
+
+			freeaddrinfo(servinfo);
 		}
 	} else {
-		if ( ! inet_aton(host, &(sock_adr->sin_addr)) ) {
-			hostent = gethostbyname(host);
-			if (hostent == NULL)
-				return -3;
+		// printf("memset()\n");
+		memset(&hints, 0, sizeof(hints));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_STREAM;
 
-			memcpy(&sock_adr->sin_addr, hostent->h_addr_list[0], hostent->h_length);
-			sock_adr->sin_port = htons((uint16_t)80);
+		// printf("getaddrinfo() : %s \n", host);
+		if (getaddrinfo(host, "80", &hints, &servinfo) != 0)
+			return -3;
+		else {
+			// printf("memcpy()\n");
 
-			return 3;
-		} else {
-			sock_adr->sin_port = htons((uint16_t)80);
+			memcpy(sock_adr, servinfo->ai_addr, servinfo->ai_addrlen);
 
-			return 4;
+			// printf("freeaddrinfo()\n");
+			freeaddrinfo(servinfo);
 		}
 	}
 
