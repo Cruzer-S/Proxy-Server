@@ -28,21 +28,18 @@
 
 struct event_data {
 	int pipe_fd[2];
-
-	char *data;
-	int data_size;
-
-	int read_len, write_len;
 };
 
 struct thread_args {
+	int buffer_size, header_size;
+	int type;
 	struct epoll_handler *handler[2];
 };
 
 inline int receive_header(int , char *, int);
 inline int parse_header(const char *, int , void *);
-inline int connect_server(struct event_data *);
-inline struct event_data *create_event_data(int , int , int );
+inline int connect_server(struct event_data *, char *, int );
+inline struct event_data *create_event_data(int , int );
 
 void *worker_thread(void *);
 // void *server_thread(void *);
@@ -81,11 +78,17 @@ int main(int argc, char *argv[])
 	if ( (ret = create_epoll_handler(&ep_stoc, EPOLL_SIZE)) != 0)
 		err_msg("create_epoll_handler(stoc) error: %d", ERR_CTC, ret);
 
+	serv_arg.type = 0;
+	serv_arg.header_size = 0;
+	serv_arg.buffer_size = BUFFER_SIZE;
 	serv_arg.handler[0] = &ep_stoc;
 	serv_arg.handler[1] = &ep_ctos;
 	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&serv_arg) != 0)
 		err_msg("pthread_create() error", ERR_CTC);
 
+	clnt_arg.type = 1;
+	clnt_arg.header_size = HEADER_SIZE;
+	clnt_arg.buffer_size = BUFFER_SIZE;
 	clnt_arg.handler[0] = &ep_ctos;
 	clnt_arg.handler[1] = &ep_stoc;
 	if (pthread_create((pthread_t [1]) { 0 }, NULL, worker_thread, (void *)&clnt_arg) != 0)
@@ -113,8 +116,9 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		ev_data = create_event_data(clnt_sock, -1, HEADER_SIZE);
+		ev_data = create_event_data(clnt_sock, -1);
 		if (ev_data == NULL) { 
+			close(clnt_sock);
 			err_msg("create_event_data() error", ERR_NRM);
 			continue;
 		} 
@@ -123,12 +127,8 @@ int main(int argc, char *argv[])
 				&ep_ctos, clnt_sock, 
 				EPOLLIN | EPOLLET, ev_data) != 0) {
 			close(clnt_sock);
-
-			atomic_free(ev_data->data);
 			atomic_free(ev_data);
-			
 			// err_msg("register_epoll_handler() error", ERR_NRM);
-
 			continue;
 		}
 	}
@@ -146,17 +146,20 @@ void *worker_thread(void *args)
 	struct epoll_handler	*handler		= thd_arg->handler[0],
 							*target_handler = thd_arg->handler[1];
 
-	int cnt, ret;
+	int buffer_size = thd_arg->buffer_size;
+	int header_size = thd_arg->header_size;
+
+	int count;
 	
 	for(;;)
 	{
-		cnt = wait_epoll_handler(handler);
-		if (cnt == -1) {
-			err_msg("wait_epoll_handler() error: %d", ERR_CHK, cnt);
+		count = wait_epoll_handler(handler);
+		if (count == -1) {
+			err_msg("wait_epoll_handler() error: %d", ERR_CHK, count);
 			continue;
 		}
 
-		for (int i = 0; i < cnt; i++)
+		for (int i = 0; i < count; i++)
 		{
 			ev_data = get_epoll_handler(handler);
 
@@ -166,17 +169,19 @@ void *worker_thread(void *args)
 			}
 			
 			if (ev_data->pipe_fd[1] == -1) {
-				if ( connect_server(ev_data) < 0) {
+				int read_len;
+				char header[header_size];
+				if ( (read_len = connect_server(ev_data, header, header_size)) < 0) {
 					err_msg("connect_server() error", ERR_CHK);
-					goto ERROR_HANDLER;
+					goto CLEANUP;
 				}
 
 				struct event_data *serv_data = 
-					create_event_data(ev_data->pipe_fd[1], ev_data->pipe_fd[0], BUFFER_SIZE);
+					create_event_data(ev_data->pipe_fd[1], ev_data->pipe_fd[0]);
 
 				if (serv_data == NULL) {
 					err_msg("create_event_data() error", ERR_CHK);
-					goto ERROR_HANDLER;
+					goto CLEANUP;
 				}
 					
 				if (register_epoll_handler(
@@ -184,26 +189,46 @@ void *worker_thread(void *args)
 						EPOLLIN | EPOLLET, serv_data) != 0) {
 					err_msg("register_epoll_handler() error", ERR_NRM);
 
-					atomic_free(serv_data->data);
 					atomic_free(serv_data);
 					close(serv_data->pipe_fd[0]);
 
-					goto ERROR_HANDLER;
+					goto CLEANUP;
 				}
 
-				printf("make connection [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);
-				write(ev_data->pipe_fd[1], ev_data->data, ev_data->read_len);
-				printf("header: %s", ev_data->data);
-				
-				continue; 
+				printf("make connection [%d -> %d] %d \n", 
+						ev_data->pipe_fd[0], ev_data->pipe_fd[1], thd_arg->type);
 
-				ERROR_HANDLER: ; {
-					release_epoll_handler(handler, ev_data->pipe_fd[0]);
-					close(ev_data->pipe_fd[0]);
+				write(ev_data->pipe_fd[1], header, read_len);
+				// printf("send data: %s", header);
+			} else {
+				char buffer[buffer_size];
 
-					atomic_free(ev_data->data);
-					atomic_free(ev_data);
+				for (;;) {
+					int str_len = read(ev_data->pipe_fd[0], buffer, buffer_size);
+					if (str_len == 0) {
+						printf("close request [%d -> %d] %d \n", 
+								ev_data->pipe_fd[0], ev_data->pipe_fd[1], thd_arg->type);
+
+						goto CLEANUP;
+					} else if (str_len < 0) {
+						if (errno == EAGAIN)
+							break;
+						else
+							err_msg("read() error", ERR_CHK);
+					} else {
+						// printf("send data: %s", buffer);
+						write(ev_data->pipe_fd[1], buffer, str_len);
+					}
 				}
+			}
+
+			continue;
+
+			CLEANUP: ; {
+				release_epoll_handler(handler, ev_data->pipe_fd[0]);
+				close(ev_data->pipe_fd[0]);
+
+				atomic_free(ev_data);
 			}
 		}
 	}
@@ -286,42 +311,33 @@ int parse_header(const char *header, int type, void *ret)
 	return 1;
 }
 
-struct event_data *create_event_data(int sock1, int sock2, int data_size)
+struct event_data *create_event_data(int sock1, int sock2)
 {
 	struct event_data *ev_data = atomic_alloc(sizeof(struct event_data));
+
 	if (ev_data == NULL)
 		return NULL;
 
 	ev_data->pipe_fd[0] = sock1;
 	ev_data->pipe_fd[1] = sock2;
 
-	ev_data->data_size = data_size;
-
-	ev_data->read_len = ev_data->write_len = 0;
-
-	ev_data->data = atomic_alloc(data_size);
-	if (ev_data->data == NULL)
-		return NULL;
-
 	return ev_data;
 }
 
-int connect_server(struct event_data *ev_data)
+int connect_server(struct event_data *ev_data, char *header, int header_size)
 {
 	int read_len;
 	struct sockaddr_in serv_adr;
 
-	if ( (read_len = receive_header(ev_data->pipe_fd[0], ev_data->data, ev_data->data_size)) < 0)
+	if ( (read_len = receive_header(ev_data->pipe_fd[0], header, header_size)) < 0)
 		return -1;
-	else
-		ev_data->read_len = read_len;
 
-	if (parse_header(ev_data->data, 0, &serv_adr) < 0)
+	if (parse_header(header, 0, &serv_adr) < 0)
 		return -2;
 
 	ev_data->pipe_fd[1] = connect_socket2(&serv_adr);
 	if (ev_data->pipe_fd[1] < 0)
 		return -3;
 
-	return 0;
+	return read_len;
 }
