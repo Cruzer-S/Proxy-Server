@@ -127,7 +127,7 @@ int main(int argc, char *argv[])
 			atomic_free(ev_data->data);
 			atomic_free(ev_data);
 			
-			err_msg("register_epoll_handler() error", ERR_NRM);
+			// err_msg("register_epoll_handler() error", ERR_NRM);
 
 			continue;
 		}
