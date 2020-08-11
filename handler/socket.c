@@ -146,8 +146,7 @@ int translate_host(char *host, struct sockaddr_in *sock_adr)
 
 		port = (colon + 1);
 		port_num = strtol(port, NULL, 10);
-		if (port_num == 0) 
-			return -1;
+		if (port_num == 0) return -1;
 
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_family = AF_INET;
@@ -156,29 +155,25 @@ int translate_host(char *host, struct sockaddr_in *sock_adr)
 		*colon = '\0';
 		if (getaddrinfo(host, port, &hints, &servinfo) != 0) {
 			*colon = ':';
+
+			printf("failed to getaddrinfo() \n");
 			return -2;
 		} else {
 			*colon = ':';
 
 			memcpy(sock_adr, servinfo->ai_addr, servinfo->ai_addrlen);
-
 			freeaddrinfo(servinfo);
 		}
 	} else {
-		// printf("memset()\n");
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_family = AF_INET;
 		hints.ai_socktype = SOCK_STREAM;
 
-		// printf("getaddrinfo() : %s \n", host);
-		if (getaddrinfo(host, "80", &hints, &servinfo) != 0)
+		if (getaddrinfo(host, "80", &hints, &servinfo) != 0) {
+			printf("failed to getaddrinfo() \n");
 			return -3;
-		else {
-			// printf("memcpy()\n");
-
+		} else {
 			memcpy(sock_adr, servinfo->ai_addr, servinfo->ai_addrlen);
-
-			// printf("freeaddrinfo()\n");
 			freeaddrinfo(servinfo);
 		}
 	}
