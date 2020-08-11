@@ -111,7 +111,7 @@ int main(int argc, char *argv[])
 		}
 
 		ev_data = create_event_data(clnt_sock, -1, NULL);
-		if (ev_data == NULL) { 
+		if (ev_data == NULL) {
 			close(clnt_sock);
 			err_msg("create_event_data() error", ERR_NRM);
 			continue;
@@ -169,6 +169,7 @@ void *worker_thread(void *args)
 			{
 				int read_len;
 				char header[header_size];
+
 				if ( (read_len = connect_server(ev_data, header, header_size)) < 0) {
 					err_msg("connect_server() error", ERR_CHK);
 					goto CLEANUP;
@@ -189,7 +190,7 @@ void *worker_thread(void *args)
 					err_msg("register_epoll_handler() error", ERR_NRM);
 
 					atomic_free(serv_data);
-					close(serv_data->pipe_fd[0]);
+					close(serv_data->pipe_fd[1]);
 
 					goto CLEANUP;
 				}
@@ -200,7 +201,7 @@ void *worker_thread(void *args)
 
 				printf("establish connection [%d <-> %d] \n", 
 							ev_data->pipe_fd[0], ev_data->pipe_fd[1]);
-			} 
+			}
 			else 
 			{
 				char buffer[buffer_size];
@@ -209,15 +210,18 @@ void *worker_thread(void *args)
 				{
 					int str_len = read(ev_data->pipe_fd[0], buffer, buffer_size);
 					if (str_len == 0) {
-						printf("disconnect signal [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);	
+						printf("disconnect signal [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);
+
 						close(ev_data->pipe_fd[1]);
-						
+
 						goto CLEANUP;
+
 					} else if (str_len < 0) {
 						if (errno == EAGAIN) {
 							break;
 						} else {
-							err_msg("read() error", ERR_CHK);	
+							err_msg("read() error", ERR_CHK);
+
 							close(ev_data->pipe_fd[1]);
 
 							goto CLEANUP;
