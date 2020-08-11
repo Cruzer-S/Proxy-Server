@@ -209,22 +209,16 @@ void *worker_thread(void *args)
 				{
 					int str_len = read(ev_data->pipe_fd[0], buffer, buffer_size);
 					if (str_len == 0) {
-						printf("disconnect signal [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);
-
-						release_epoll_handler(target_handler, ev_data->pipe_fd[1]);
+						printf("disconnect signal [%d -> %d] \n", ev_data->pipe_fd[0], ev_data->pipe_fd[1]);	
 						close(ev_data->pipe_fd[1]);
-						atomic_free(ev_data->target);
-
+						
 						goto CLEANUP;
 					} else if (str_len < 0) {
 						if (errno == EAGAIN) {
 							break;
 						} else {
-							err_msg("read() error", ERR_CHK);
-							
-							release_epoll_handler(target_handler, ev_data->pipe_fd[1]);
+							err_msg("read() error", ERR_CHK);	
 							close(ev_data->pipe_fd[1]);
-							atomic_free(ev_data->target);
 
 							goto CLEANUP;
 						}
